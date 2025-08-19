@@ -1,0 +1,113 @@
+---
+# GitHub Actions Self-Hosted Runner Installation
+- name: Create github-runner user
+  user:
+    name: github-runner
+    system: true
+    shell: /bin/bash
+    home: /home/github-runner
+    create_home: true
+    
+- name: Add github-runner to docker group
+  user:
+    name: github-runner
+    groups: docker
+    append: true
+    
+- name: Create runner directory
+  file:
+    path: /opt/github-runner
+    state: directory
+    owner: github-runner
+    group: github-runner
+    mode: '0755'
+    
+- name: Download GitHub Actions Runner
+  get_url:
+    url: "https://github.com/actions/runner/releases/download/v{{ github_runner_version }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz"
+    dest: "/tmp/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz"
+    mode: '0644'
+  vars:
+    github_runner_version: "2.311.0"
+    
+- name: Extract GitHub Actions Runner
+  unarchive:
+    src: "/tmp/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz"
+    dest: /opt/github-runner
+    owner: github-runner
+    group: github-runner
+    remote_src: true
+  vars:
+    github_runner_version: "2.311.0"
+    
+- name: Install runner dependencies
+  command: /opt/github-runner/bin/installdependencies.sh
+  become: true
+  
+- name: Create runner configuration script
+  template:
+    src: configure-runner.sh.j2
+    dest: /opt/github-runner/configure-runner.sh
+    owner: github-runner
+    group: github-runner
+    mode: '0755'
+    
+- name: Configure GitHub Runner
+  command: /opt/github-runner/configure-runner.sh
+  become_user: github-runner
+  args:
+    chdir: /opt/github-runner
+    creates: /opt/github-runner/.runner
+    
+- name: Install runner as service
+  command: /opt/github-runner/svc.sh install github-runner
+  args:
+    creates: /etc/systemd/system/actions.runner.*.service
+    
+- name: Start and enable GitHub Runner service
+  systemd:
+    name: "actions.runner.{{ ansible_hostname }}.{{ ansible_hostname }}.service"
+    state: started
+    enabled: true
+    daemon_reload: true
+    
+- name: Install additional tools for CI/CD
+  package:
+    name:
+      - kubectl
+      - helm
+      - jq
+      - yq
+      - git
+      - make
+      - build-essential
+    state: present
+    
+- name: Install Node.js for frontend builds
+  shell: |
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    apt-get install -y nodejs
+  args:
+    creates: /usr/bin/node
+    
+- name: Install Docker Compose
+  pip:
+    name: docker-compose
+    state: present
+    
+- name: Configure kubectl for github-runner user
+  copy:
+    src: "{{ playbook_dir }}/../files/admin.conf"
+    dest: /home/github-runner/.kube/config
+    owner: github-runner
+    group: github-runner
+    mode: '0600'
+  when: kubelet_conf_exists is defined
+  
+- name: Create .kube directory for github-runner
+  file:
+    path: /home/github-runner/.kube
+    state: directory
+    owner: github-runner
+    group: github-runner
+    mode: '0755'

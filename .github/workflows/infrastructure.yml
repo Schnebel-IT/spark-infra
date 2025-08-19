@@ -1,0 +1,215 @@
+name: Infrastructure Management
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'kubernetes/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'kubernetes/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Infrastructure action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+        - plan
+        - apply
+        - destroy
+        - ansible-deploy
+      target:
+        description: 'Target component'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - terraform
+        - ansible
+        - kubernetes
+
+env:
+  TF_VAR_proxmox_password: ${{ secrets.PROXMOX_PASSWORD }}
+  TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+  ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+
+jobs:
+  # Terraform Plan/Apply
+  terraform:
+    runs-on: [self-hosted, spark-cluster]
+    if: |
+      contains(github.event.head_commit.modified, 'terraform/') ||
+      github.event_name == 'workflow_dispatch' && 
+      (inputs.target == 'terraform' || inputs.target == 'all')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.6.0
+        
+    - name: Terraform Format Check
+      run: terraform fmt -check -recursive terraform/
+      
+    - name: Terraform Init
+      run: |
+        cd terraform
+        terraform init
+        
+    - name: Terraform Validate
+      run: |
+        cd terraform
+        terraform validate
+        
+    - name: Terraform Plan
+      if: github.event_name == 'pull_request' || inputs.action == 'plan'
+      run: |
+        cd terraform
+        terraform plan -out=tfplan
+        
+    - name: Terraform Apply
+      if: |
+        (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+        (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+      run: |
+        cd terraform
+        terraform apply -auto-approve
+        
+    - name: Terraform Destroy
+      if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+      run: |
+        cd terraform
+        terraform destroy -auto-approve
+
+  # Ansible Configuration
+  ansible:
+    runs-on: [self-hosted, spark-cluster]
+    needs: [terraform]
+    if: |
+      always() &&
+      (needs.terraform.result == 'success' || needs.terraform.result == 'skipped') &&
+      (contains(github.event.head_commit.modified, 'ansible/') ||
+       github.event_name == 'workflow_dispatch' && 
+       (inputs.target == 'ansible' || inputs.target == 'all' || inputs.action == 'ansible-deploy'))
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Ansible
+      run: |
+        pip3 install ansible ansible-vault
+        ansible-galaxy install -r ansible/requirements.yml || echo "No requirements file"
+        
+    - name: Ansible Syntax Check
+      run: |
+        cd ansible
+        echo "$ANSIBLE_VAULT_PASSWORD" > .vault_pass
+        ansible-playbook --syntax-check --vault-password-file .vault_pass playbooks/site.yml
+        rm .vault_pass
+        
+    - name: Ansible Dry Run
+      if: github.event_name == 'pull_request'
+      run: |
+        cd ansible
+        echo "$ANSIBLE_VAULT_PASSWORD" > .vault_pass
+        ansible-playbook --check --diff --vault-password-file .vault_pass playbooks/site.yml
+        rm .vault_pass
+        
+    - name: Deploy with Ansible
+      if: |
+        (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+        (github.event_name == 'workflow_dispatch' && 
+         (inputs.action == 'ansible-deploy' || inputs.action == 'apply'))
+      run: |
+        cd ansible
+        echo "$ANSIBLE_VAULT_PASSWORD" > .vault_pass
+        ansible-playbook --vault-password-file .vault_pass playbooks/site.yml
+        rm .vault_pass
+
+  # Kubernetes Manifests
+  kubernetes:
+    runs-on: [self-hosted, spark-cluster]
+    needs: [ansible]
+    if: |
+      always() &&
+      (needs.ansible.result == 'success' || needs.ansible.result == 'skipped') &&
+      (contains(github.event.head_commit.modified, 'kubernetes/') ||
+       github.event_name == 'workflow_dispatch' && 
+       (inputs.target == 'kubernetes' || inputs.target == 'all'))
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Validate Kubernetes manifests
+      run: |
+        # Validate YAML syntax
+        find kubernetes/ -name "*.yaml" -o -name "*.yml" | xargs -I {} kubectl --dry-run=client apply -f {}
+        
+    - name: Apply Kubernetes manifests
+      if: |
+        (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+        (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+      run: |
+        # Apply base manifests
+        kubectl apply -f kubernetes/manifests/
+        
+        # Wait for rollout
+        kubectl rollout status deployment -n spark-system --timeout=300s || echo "No deployments in spark-system"
+        kubectl rollout status deployment -n spark-monitoring --timeout=300s || echo "No deployments in spark-monitoring"
+
+  # Infrastructure Health Check
+  health-check:
+    runs-on: [self-hosted, spark-cluster]
+    needs: [terraform, ansible, kubernetes]
+    if: always()
+    
+    steps:
+    - name: Check Cluster Health
+      run: |
+        echo "=== Cluster Nodes ==="
+        kubectl get nodes -o wide
+        
+        echo "=== System Pods ==="
+        kubectl get pods -A | grep -E "(kube-system|spark-system|spark-monitoring)"
+        
+        echo "=== Ingress Controllers ==="
+        kubectl get svc -n ingress-nginx-public -o wide || echo "Public ingress not found"
+        kubectl get svc -n ingress-nginx-internal -o wide || echo "Internal ingress not found"
+        
+        echo "=== Storage ==="
+        kubectl get pv,pvc -A
+        
+        echo "=== Certificate Status ==="
+        kubectl get certificates -A || echo "No certificates found"
+        
+    - name: Generate Infrastructure Report
+      run: |
+        echo "# Infrastructure Status Report" > infrastructure-report.md
+        echo "Generated: $(date)" >> infrastructure-report.md
+        echo "" >> infrastructure-report.md
+        
+        echo "## Cluster Nodes" >> infrastructure-report.md
+        kubectl get nodes -o wide >> infrastructure-report.md
+        
+        echo "" >> infrastructure-report.md
+        echo "## Resource Usage" >> infrastructure-report.md
+        kubectl top nodes >> infrastructure-report.md || echo "Metrics not available" >> infrastructure-report.md
+        
+    - name: Upload Infrastructure Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: infrastructure-report
+        path: infrastructure-report.md

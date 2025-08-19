@@ -1,0 +1,179 @@
+name: Deploy to Spark Cluster
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+        - development
+        - production
+      force_deploy:
+        description: 'Force deployment (skip tests)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: registry.schnebel-it.local
+  KUBECONFIG: /home/github-runner/.kube/config
+
+jobs:
+  # Build and Test Job
+  build-and-test:
+    runs-on: [self-hosted, spark-cluster]
+    if: github.event_name != 'workflow_dispatch' || !inputs.force_deploy
+    
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.REGISTRY_USERNAME }}
+        password: ${{ secrets.REGISTRY_PASSWORD }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ github.repository }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+          
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Run security scan
+      uses: docker/scout-action@v1
+      if: github.event_name == 'pull_request'
+      with:
+        command: cves
+        image: ${{ steps.meta.outputs.tags }}
+        only-severities: critical,high
+        
+    - name: Run tests
+      run: |
+        # Beispiel für Tests - anpassen je nach Anwendung
+        docker run --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -w /workspace \
+          ${{ steps.meta.outputs.tags }} \
+          npm test || echo "No tests configured"
+
+  # Deploy to Development
+  deploy-development:
+    runs-on: [self-hosted, spark-cluster]
+    needs: [build-and-test]
+    if: |
+      (github.ref == 'refs/heads/develop' && github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'development')
+    environment: development
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Deploy to Development
+      run: |
+        # Update image tag in Kubernetes manifests
+        sed -i "s|image: .*|image: ${{ needs.build-and-test.outputs.image-tag }}|g" k8s/development/*.yaml
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/development/ -n spark-development
+        
+        # Wait for rollout to complete
+        kubectl rollout status deployment/${{ github.event.repository.name }} -n spark-development --timeout=300s
+        
+    - name: Run smoke tests
+      run: |
+        # Warten bis Service verfügbar ist
+        kubectl wait --for=condition=ready pod -l app=${{ github.event.repository.name }} -n spark-development --timeout=120s
+        
+        # Smoke test
+        SERVICE_URL=$(kubectl get ingress -n spark-development -o jsonpath='{.items[0].spec.rules[0].host}')
+        curl -f http://$SERVICE_URL/health || echo "Health check failed"
+
+  # Deploy to Production
+  deploy-production:
+    runs-on: [self-hosted, spark-cluster]
+    needs: [build-and-test]
+    if: |
+      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Deploy to Production
+      run: |
+        # Update image tag in Kubernetes manifests
+        sed -i "s|image: .*|image: ${{ needs.build-and-test.outputs.image-tag }}|g" k8s/production/*.yaml
+        
+        # Apply Kubernetes manifests with rolling update
+        kubectl apply -f k8s/production/ -n spark-production
+        
+        # Wait for rollout to complete
+        kubectl rollout status deployment/${{ github.event.repository.name }} -n spark-production --timeout=600s
+        
+    - name: Verify deployment
+      run: |
+        # Verify all pods are running
+        kubectl wait --for=condition=ready pod -l app=${{ github.event.repository.name }} -n spark-production --timeout=300s
+        
+        # Health check
+        SERVICE_URL=$(kubectl get ingress -n spark-production -o jsonpath='{.items[0].spec.rules[0].host}')
+        for i in {1..5}; do
+          if curl -f https://$SERVICE_URL/health; then
+            echo "Health check passed"
+            break
+          fi
+          echo "Health check attempt $i failed, retrying..."
+          sleep 10
+        done
+
+  # Cleanup old images
+  cleanup:
+    runs-on: [self-hosted, spark-cluster]
+    needs: [deploy-development, deploy-production]
+    if: always() && (needs.deploy-development.result == 'success' || needs.deploy-production.result == 'success')
+    
+    steps:
+    - name: Clean up old Docker images
+      run: |
+        # Keep last 5 images, remove older ones
+        docker images ${{ env.REGISTRY }}/${{ github.repository }} --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" | \
+        tail -n +6 | awk '{print $1}' | xargs -r docker rmi || true
+        
+        # Clean up dangling images
+        docker image prune -f

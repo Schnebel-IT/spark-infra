@@ -1,0 +1,7 @@
+---
+# Kubernetes common handlers
+- name: restart kubelet
+  systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,106 @@
+---
+# Network Policy für öffentliche Applications
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: public-apps-policy
+  namespace: spark-production
+spec:
+  podSelector:
+    matchLabels:
+      app.schnebel-it.de/exposure: public
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 3000
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
+  - from: []  # Allow all ingress for public apps
+  egress:
+  - {} # Allow all egress
+
+---
+# Network Policy für interne Applications (nur VPN-Zugriff)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: internal-apps-policy
+  namespace: spark-production
+spec:
+  podSelector:
+    matchLabels:
+      app.schnebel-it.de/exposure: internal
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx-internal
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 3000
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
+  - from:
+    - ipBlock:
+        cidr: 10.0.0.0/8  # VPN-Netzwerk
+    - ipBlock:
+        cidr: 192.168.0.0/16  # Internes Netzwerk
+  egress:
+  - {} # Allow all egress
+
+---
+# Network Policy für Development Namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: development-policy
+  namespace: spark-development
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: spark-development
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx-internal
+    - ipBlock:
+        cidr: 10.0.0.0/8  # VPN-Netzwerk
+    - ipBlock:
+        cidr: 192.168.0.0/16  # Internes Netzwerk
+  egress:
+  - {} # Allow all egress
+
+---
+# Default Deny Policy für Production
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: spark-production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress

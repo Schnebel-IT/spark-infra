@@ -1,0 +1,22 @@
+#!/bin/bash
+# GitHub Runner Configuration Script
+
+# Configuration variables
+GITHUB_URL="{{ github_organization_url | default('https://github.com/schnebel-it') }}"
+RUNNER_TOKEN="{{ vault_github_runner_token }}"
+RUNNER_NAME="{{ ansible_hostname }}-runner"
+RUNNER_LABELS="self-hosted,linux,x64,spark-cluster,{{ ansible_hostname }}"
+
+# Configure the runner
+./config.sh \
+    --url "${GITHUB_URL}" \
+    --token "${RUNNER_TOKEN}" \
+    --name "${RUNNER_NAME}" \
+    --labels "${RUNNER_LABELS}" \
+    --work "_work" \
+    --unattended \
+    --replace
+
+echo "GitHub Runner configured successfully!"
+echo "Runner Name: ${RUNNER_NAME}"
+echo "Labels: ${RUNNER_LABELS}"

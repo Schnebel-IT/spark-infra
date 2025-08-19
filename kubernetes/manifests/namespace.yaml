@@ -1,0 +1,36 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spark-system
+  labels:
+    name: spark-system
+    app.kubernetes.io/name: spark
+    app.kubernetes.io/component: system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spark-monitoring
+  labels:
+    name: spark-monitoring
+    app.kubernetes.io/name: spark
+    app.kubernetes.io/component: monitoring
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spark-development
+  labels:
+    name: spark-development
+    app.kubernetes.io/name: spark
+    app.kubernetes.io/component: development
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spark-production
+  labels:
+    name: spark-production
+    app.kubernetes.io/name: spark
+    app.kubernetes.io/component: production

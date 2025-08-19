@@ -1,0 +1,61 @@
+# Global variables for Spark Infrastructure
+
+# Network Configuration
+network:
+  domain: "schnebel-it.local"
+  dns_servers:
+    - "8.8.8.8"
+    - "8.8.4.4"
+  ntp_servers:
+    - "pool.ntp.org"
+
+# SSH Configuration
+ssh:
+  port: 22
+  disable_root_login: false
+  disable_password_auth: true
+  
+# System Configuration
+system:
+  timezone: "Europe/Berlin"
+  locale: "de_DE.UTF-8"
+  
+# Docker Configuration
+docker:
+  version: "24.0.7"
+  data_root: "/var/lib/docker"
+  log_driver: "json-file"
+  log_opts:
+    max_size: "10m"
+    max_file: "3"
+
+# Kubernetes Configuration
+kubernetes:
+  version: "1.28.2"
+  cni: "calico"
+  pod_subnet: "10.244.0.0/16"
+  service_subnet: "10.96.0.0/12"
+  cluster_dns: "10.96.0.10"
+  
+# Security
+security:
+  fail2ban_enabled: true
+  ufw_enabled: true
+  automatic_updates: true
+  
+# Backup Configuration
+backup:
+  enabled: true
+  retention_days: 30
+  backup_time: "02:00"
+  
+# Monitoring
+monitoring:
+  prometheus:
+    retention: "30d"
+    scrape_interval: "15s"
+  grafana:
+    admin_user: "admin"
+  elasticsearch:
+    heap_size: "2g"
+    retention_days: 14

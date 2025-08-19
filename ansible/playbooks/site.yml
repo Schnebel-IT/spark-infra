@@ -1,0 +1,34 @@
+---
+# Main playbook for Spark Infrastructure deployment
+- name: Deploy Spark Infrastructure
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display deployment information
+      debug:
+        msg: |
+          Starting Spark Infrastructure deployment for Schnebel-IT
+          Cluster: {{ cluster_name }}
+          Domain: {{ domain_name }}
+
+# Proxmox Host Configuration
+- import_playbook: proxmox-setup.yml
+  when: "'proxmox' in group_names"
+
+# Base System Configuration for all VMs
+- import_playbook: base-system.yml
+
+# Kubernetes Cluster Setup
+- import_playbook: kubernetes-cluster.yml
+  when: "'kubernetes' in group_names"
+
+# Monitoring Stack Deployment
+- import_playbook: monitoring-stack.yml
+  when: "'monitoring' in group_names"
+
+# Development Tools Setup
+- import_playbook: development-tools.yml
+  when: "'development' in group_names"
+
+# Final validation and health checks
+- import_playbook: health-checks.yml

@@ -1,0 +1,43 @@
+# Spark Infrastructure Configuration Example
+# Copy this file to terraform.tfvars and adjust values
+
+# Proxmox Configuration
+proxmox_api_url      = "https://192.168.1.100:8006/api2/json"
+proxmox_user         = "root@pam"
+proxmox_password     = "your-proxmox-password"
+proxmox_node         = "proxmox-01"
+proxmox_tls_insecure = true
+
+# VM Template (create this first in Proxmox)
+vm_template = "ubuntu-22.04-cloud-init"
+
+# Network Configuration
+network_bridge = "vmbr0"
+network_prefix = "192.168.1"
+network_gateway = "192.168.1.1"
+
+# SSH Key (replace with your public key)
+ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC... your-public-key"
+
+# Cluster Configuration
+k8s_master_count = 1
+k8s_worker_count = 2
+monitoring_count = 1
+development_count = 2
+
+# Resource Allocation (adjust based on your hardware)
+k8s_master_cores = 2
+k8s_master_memory = 4096
+k8s_master_disk_size = "50G"
+
+k8s_worker_cores = 4
+k8s_worker_memory = 8192
+k8s_worker_disk_size = "100G"
+
+monitoring_cores = 2
+monitoring_memory = 4096
+monitoring_disk_size = "100G"
+
+development_cores = 2
+development_memory = 4096
+development_disk_size = "50G"

@@ -1,0 +1,84 @@
+---
+# Kubernetes cluster setup playbook
+- name: Setup Kubernetes Master Nodes
+  hosts: k8s_masters
+  become: true
+  gather_facts: true
+  serial: 1
+  
+  pre_tasks:
+    - name: Verify Docker is running
+      systemd:
+        name: docker
+        state: started
+        
+  roles:
+    - kubernetes-common
+    - kubernetes-master
+    
+  post_tasks:
+    - name: Get kubeconfig for workers
+      fetch:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ playbook_dir }}/../files/admin.conf"
+        flat: true
+      when: inventory_hostname == groups['k8s_masters'][0]
+
+- name: Setup Kubernetes Worker Nodes
+  hosts: k8s_workers
+  become: true
+  gather_facts: true
+  
+  pre_tasks:
+    - name: Wait for master to be ready
+      wait_for:
+        host: "{{ hostvars[groups['k8s_masters'][0]]['ansible_host'] }}"
+        port: 6443
+        timeout: 300
+        
+  roles:
+    - kubernetes-common
+    - kubernetes-worker
+
+- name: Configure Kubernetes Networking and Add-ons
+  hosts: k8s_masters[0]
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Install Calico CNI
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: calico-system
+            
+    - name: Apply Calico manifest
+      shell: |
+        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/tigera-operator.yaml
+        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/custom-resources.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+        
+    - name: Install NGINX Ingress Controller
+      shell: |
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.2/deploy/static/provider/baremetal/deploy.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+        
+    - name: Install cert-manager
+      shell: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+        
+    - name: Wait for all pods to be ready
+      shell: kubectl get pods --all-namespaces --field-selector=status.phase!=Running
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: pending_pods
+      until: pending_pods.stdout_lines | length == 1
+      retries: 30
+      delay: 10

@@ -1,0 +1,19 @@
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "{{ docker.log_driver }}",
+  "log-opts": {
+{% for key, value in docker.log_opts.items() %}
+    "{{ key }}": "{{ value }}"{% if not loop.last %},{% endif %}
+{% endfor %}
+  },
+  "data-root": "{{ docker.data_root }}",
+  "storage-driver": "overlay2",
+  "storage-opts": [
+    "overlay2.override_kernel_check=true"
+  ],
+  "live-restore": true,
+  "userland-proxy": false,
+  "experimental": false,
+  "metrics-addr": "0.0.0.0:9323",
+  "experimental": false
+}

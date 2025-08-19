@@ -1,0 +1,39 @@
+---
+# Base system configuration for all VMs
+- name: Configure base system for all hosts
+  hosts: all:!proxmox
+  become: true
+  gather_facts: true
+  
+  pre_tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+  roles:
+    - common
+    - security
+    - docker
+    
+  post_tasks:
+    - name: Ensure all services are started and enabled
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - docker
+        - fail2ban
+        - ufw
+      ignore_errors: true
+      
+    - name: Verify system health
+      command: systemctl is-system-running
+      register: system_status
+      ignore_errors: true
+      
+    - name: Display system status
+      debug:
+        msg: "System status: {{ system_status.stdout }}"

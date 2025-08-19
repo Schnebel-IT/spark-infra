@@ -1,0 +1,83 @@
+---
+# Common system configuration tasks
+- name: Set timezone
+  timezone:
+    name: "{{ system.timezone }}"
+    
+- name: Set hostname
+  hostname:
+    name: "{{ inventory_hostname }}"
+    
+- name: Update /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    line: "{{ ansible_default_ipv4.address }} {{ inventory_hostname }}.{{ network.domain }} {{ inventory_hostname }}"
+    
+- name: Install common packages
+  package:
+    name:
+      - curl
+      - wget
+      - vim
+      - htop
+      - git
+      - unzip
+      - software-properties-common
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - python3-pip
+      - python3-setuptools
+      - jq
+      - tree
+      - ncdu
+      - iotop
+    state: present
+    
+- name: Configure DNS servers
+  template:
+    src: resolv.conf.j2
+    dest: /etc/resolv.conf
+    backup: true
+    
+- name: Setup NTP
+  package:
+    name: chrony
+    state: present
+    
+- name: Configure chrony
+  template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    backup: true
+  notify: restart chrony
+  
+- name: Enable and start chrony
+  systemd:
+    name: chrony
+    state: started
+    enabled: true
+    
+- name: Configure SSH
+  template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    backup: true
+    validate: /usr/sbin/sshd -t -f %s
+  notify: restart ssh
+  
+- name: Add SSH public key
+  authorized_key:
+    user: "{{ ansible_user }}"
+    key: "{{ ssh_public_key }}"
+    state: present
+    
+- name: Disable swap
+  shell: swapoff -a
+  
+- name: Remove swap from fstab
+  lineinfile:
+    path: /etc/fstab
+    regexp: '.*swap.*'
+    state: absent

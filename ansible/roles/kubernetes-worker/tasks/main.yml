@@ -1,0 +1,43 @@
+---
+# Kubernetes worker node configuration
+- name: Check if node is already joined
+  stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf_exists
+  
+- name: Copy join command from master
+  copy:
+    src: "{{ playbook_dir }}/../files/kubernetes-join-command"
+    dest: /tmp/kubernetes-join-command
+    mode: '0600'
+  when: not kubelet_conf_exists.stat.exists
+  
+- name: Join Kubernetes cluster
+  shell: "{{ lookup('file', playbook_dir + '/../files/kubernetes-join-command') }}"
+  when: not kubelet_conf_exists.stat.exists
+  
+- name: Create .kube directory for ansible user
+  file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'
+    
+- name: Copy kubeconfig from master
+  copy:
+    src: "{{ playbook_dir }}/../files/admin.conf"
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+  when: kubelet_conf_exists.stat.exists
+  
+- name: Install bash completion for kubectl
+  shell: |
+    kubectl completion bash > /etc/bash_completion.d/kubectl
+    echo 'alias k=kubectl' >> /home/{{ ansible_user }}/.bashrc
+    echo 'complete -F __start_kubectl k' >> /home/{{ ansible_user }}/.bashrc
+  environment:
+    KUBECONFIG: "/home/{{ ansible_user }}/.kube/config"
+  become_user: "{{ ansible_user }}"
