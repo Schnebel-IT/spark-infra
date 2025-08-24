@@ -1,0 +1,7 @@
+---
+# Ansible Galaxy requirements for Kubernetes cluster setup
+collections:
+  - name: kubernetes.core
+    version: ">=2.4.0"
+  - name: community.general
+    version: ">=7.0.0"

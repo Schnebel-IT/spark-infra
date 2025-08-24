@@ -1,0 +1,246 @@
+---
+# Kubernetes control plane (manager) setup
+- name: Initialize Kubernetes control plane
+  hosts: k8s_manager
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    kubeconfig_path: /etc/kubernetes/admin.conf
+    
+  tasks:
+    - name: Check if cluster is already initialized
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: admin_conf
+      
+    - name: Display cluster initialization status
+      debug:
+        msg: "Cluster already initialized: {{ admin_conf.stat.exists }}"
+      
+    - name: Initialize Kubernetes cluster with kubeadm
+      shell: |
+        kubeadm init \
+          --apiserver-advertise-address={{ api_server_advertise_address }} \
+          --apiserver-bind-port={{ api_server_bind_port }} \
+          --pod-network-cidr={{ kubernetes_pod_subnet }} \
+          --service-cidr={{ kubernetes_service_subnet }} \
+          --node-name={{ inventory_hostname }} \
+          --ignore-preflight-errors=NumCPU \
+          --v=5
+      register: kubeadm_init
+      when: not admin_conf.stat.exists
+      failed_when: kubeadm_init.rc != 0
+      
+    - name: Verify cluster initialization was successful
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: admin_conf_after_init
+      when: kubeadm_init is defined and kubeadm_init.changed
+      
+    - name: Fail if cluster initialization did not create admin.conf
+      fail:
+        msg: "Cluster initialization failed - admin.conf not found"
+      when: kubeadm_init is defined and kubeadm_init.changed and not admin_conf_after_init.stat.exists
+      
+    - name: Display kubeadm init output
+      debug:
+        var: kubeadm_init.stdout_lines
+      when: kubeadm_init is defined and kubeadm_init.changed
+      
+    - name: Create .kube directory for root user
+      file:
+        path: /root/.kube
+        state: directory
+        mode: '0755'
+        
+    - name: Copy admin.conf to root's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0644'
+        
+    - name: Create .kube directory for ubuntu user
+      file:
+        path: /home/ubuntu/.kube
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+        
+    - name: Copy admin.conf to ubuntu user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ubuntu/.kube/config
+        remote_src: yes
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+        
+    - name: Wait for kube-apiserver to be ready
+      wait_for:
+        port: "{{ api_server_bind_port }}"
+        host: "{{ api_server_advertise_address }}"
+        delay: 10
+        timeout: 300
+        
+    - name: Verify kubectl can connect to the cluster
+      shell: kubectl cluster-info
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: cluster_info_output
+      retries: 5
+      delay: 10
+      until: cluster_info_output.rc == 0
+        
+    - name: Install CNI plugin - Calico
+      block:
+        - name: Download Calico operator manifest
+          get_url:
+            url: "{{ calico_manifest_url }}"
+            dest: /tmp/tigera-operator.yaml
+            mode: '0644'
+            
+        - name: Apply Calico operator
+          shell: kubectl apply -f /tmp/tigera-operator.yaml
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
+            
+        - name: Download Calico custom resources
+          get_url:
+            url: "{{ calico_custom_resources_url }}"
+            dest: /tmp/custom-resources.yaml
+            mode: '0644'
+            
+        - name: Modify Calico custom resources for pod subnet
+          replace:
+            path: /tmp/custom-resources.yaml
+            regexp: '192\.168\.0\.0/16'
+            replace: "{{ kubernetes_pod_subnet }}"
+            
+        - name: Apply Calico custom resources
+          shell: kubectl apply -f /tmp/custom-resources.yaml
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
+            
+      when: kubernetes_cni == "calico"
+      
+    - name: Install CNI plugin - Flannel
+      block:
+        - name: Download Flannel manifest
+          get_url:
+            url: "{{ flannel_manifest_url }}"
+            dest: /tmp/kube-flannel.yml
+            mode: '0644'
+            
+        - name: Apply Flannel CNI
+          shell: kubectl apply -f /tmp/kube-flannel.yml
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
+            
+      when: kubernetes_cni == "flannel"
+      
+    - name: Wait for CNI pods to be ready
+      shell: kubectl get pods -n kube-system --no-headers | grep -E "(calico|flannel)" | grep -v Running | wc -l
+      register: cni_pods_not_ready
+      until: cni_pods_not_ready.stdout == "0"
+      retries: 30
+      delay: 10
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+        
+    - name: Generate join token for worker nodes
+      shell: kubeadm token create --print-join-command
+      register: join_command
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+        
+    - name: Save join command to file
+      copy:
+        content: "{{ join_command.stdout }}"
+        dest: /tmp/kubernetes-join-command
+        mode: '0600'
+        
+    - name: Get cluster join token
+      shell: kubeadm token list | awk 'FNR==2{print $1}'
+      register: join_token
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+        
+    - name: Get discovery token CA cert hash
+      shell: |
+        openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | \
+        openssl rsa -pubin -outform der 2>/dev/null | \
+        openssl dgst -sha256 -hex | sed 's/^.* //'
+      register: discovery_token_ca_cert_hash
+      
+    - name: Store cluster join information
+      set_fact:
+        kubernetes_join_command: "{{ join_command.stdout }}"
+        kubernetes_join_token: "{{ join_token.stdout }}"
+        kubernetes_discovery_token_ca_cert_hash: "sha256:{{ discovery_token_ca_cert_hash.stdout }}"
+        
+    - name: Add join information to dummy host for sharing with nodes
+      add_host:
+        name: "cluster_info"
+        join_command: "{{ kubernetes_join_command }}"
+        join_token: "{{ kubernetes_join_token }}"
+        discovery_hash: "{{ kubernetes_discovery_token_ca_cert_hash }}"
+        api_server: "{{ api_server_advertise_address }}:{{ api_server_bind_port }}"
+        
+    - name: Wait for all system pods to be ready
+      shell: kubectl get pods -n kube-system --no-headers | grep -v Running | grep -v Completed | wc -l
+      register: system_pods_not_ready
+      until: system_pods_not_ready.stdout == "0"
+      retries: 30
+      delay: 10
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+        
+    - name: Remove taint from master node (allow scheduling on master)
+      shell: kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+      when: groups['k8s_nodes'] | length == 0  # Only if no worker nodes
+      
+    - name: Display cluster initialization status
+      shell: kubectl get nodes -o wide
+      register: cluster_nodes
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+        
+    - name: Show cluster status
+      debug:
+        msg: |
+          Kubernetes control plane initialized successfully!
+          
+          Cluster Information:
+          - API Server: {{ api_server_advertise_address }}:{{ api_server_bind_port }}
+          - Pod Subnet: {{ kubernetes_pod_subnet }}
+          - Service Subnet: {{ kubernetes_service_subnet }}
+          - CNI: {{ kubernetes_cni }}
+          
+          Current Nodes:
+          {{ cluster_nodes.stdout }}
+          
+          Join Command for Worker Nodes:
+          {{ kubernetes_join_command }}
+          
+    - name: Create cluster info ConfigMap for debugging
+      shell: |
+        kubectl create configmap cluster-info \
+          --from-literal=cluster-name="{{ cluster_name }}" \
+          --from-literal=api-server="{{ api_server_advertise_address }}:{{ api_server_bind_port }}" \
+          --from-literal=pod-subnet="{{ kubernetes_pod_subnet }}" \
+          --from-literal=service-subnet="{{ kubernetes_service_subnet }}" \
+          --from-literal=cni="{{ kubernetes_cni }}" \
+          --from-literal=kubernetes-version="{{ kubernetes_version }}" \
+          --namespace=kube-system \
+          --dry-run=client -o yaml | kubectl apply -f -
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes

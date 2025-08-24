@@ -1,0 +1,26 @@
+# Proxmox Connection Configuration
+proxmox_api_url      = "https://your-proxmox-server:8006/api2/json"
+proxmox_user         = "root@pam"
+proxmox_password     = "your-proxmox-password"
+proxmox_tls_insecure = true
+proxmox_node         = "your-proxmox-node-name"
+
+# VM Configuration
+manager_vm_id = 2000
+manager_ip    = "10.10.1.1"
+
+node_vm_ids = [2001, 2002, 2003]
+node_ips    = ["10.10.1.10", "10.10.1.11", "10.10.1.12"]
+
+# VM Template and Resources
+vm_template   = "ubuntu-24.04-cloudinit"
+vm_cpu        = 4
+vm_memory     = 8192
+vm_disk_size  = "50G"
+
+# Network Configuration
+network_bridge  = "vmbr2"
+network_gateway = "10.10.0.1"
+
+# SSH Configuration
+ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC... your-public-key"

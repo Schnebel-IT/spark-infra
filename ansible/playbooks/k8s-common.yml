@@ -1,0 +1,189 @@
+---
+# Common Kubernetes preparation tasks for all nodes
+- name: Prepare all nodes for Kubernetes installation
+  hosts: k8s_cluster
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+        cache_valid_time: 3600
+      register: system_update
+      
+    - name: Install required system packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+          - wget
+          - net-tools
+          - socat
+          - conntrack
+        state: present
+        
+    - name: Disable swap permanently
+      block:
+        - name: Turn off swap
+          shell: swapoff -a
+          
+        - name: Remove swap entries from /etc/fstab
+          lineinfile:
+            path: /etc/fstab
+            regexp: '.*swap.*'
+            state: absent
+            
+    - name: Load required kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ kernel_modules }}"
+      
+    - name: Ensure kernel modules are loaded at boot
+      lineinfile:
+        path: /etc/modules-load.d/k8s.conf
+        line: "{{ item }}"
+        create: yes
+      loop: "{{ kernel_modules }}"
+      
+    - name: Configure sysctl parameters for Kubernetes
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_file: /etc/sysctl.d/k8s.conf
+        reload: yes
+      loop: "{{ sysctl_params | dict2items }}"  
+    
+    # Container Runtime (containerd) Installation
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+        
+    - name: Add Docker GPG key
+      get_url:
+        url: "{{ docker_apt_key_url }}"
+        dest: /etc/apt/keyrings/docker.gpg
+        mode: '0644'
+        
+    - name: Add Docker repository
+      apt_repository:
+        repo: "{{ docker_apt_repository }}"
+        state: present
+        filename: docker
+        
+    - name: Install containerd
+      apt:
+        name:
+          - containerd.io
+        state: present
+        update_cache: yes
+        
+    - name: Create containerd configuration directory
+      file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+        
+    - name: Generate default containerd configuration
+      shell: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+        
+    - name: Configure containerd to use systemd cgroup driver
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*SystemdCgroup\s*='
+        line: '            SystemdCgroup = true'
+        insertafter: '^\s*\[plugins\."io\.containerd\.grpc\.v1\.cri"\.containerd\.runtimes\.runc\.options\]'
+        
+    - name: Enable and start containerd service
+      systemd:
+        name: containerd
+        enabled: yes
+        state: started
+        daemon_reload: yes     
+   
+    # Kubernetes Package Installation
+    - name: Add Kubernetes GPG key
+      get_url:
+        url: "{{ kubernetes_apt_key_url }}"
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
+        
+    - name: Add Kubernetes repository
+      apt_repository:
+        repo: "{{ kubernetes_apt_repository }}"
+        state: present
+        filename: kubernetes
+        
+    - name: Install Kubernetes packages
+      apt:
+        name:
+          - kubelet={{ kubernetes_version }}
+          - kubeadm={{ kubernetes_version }}
+          - kubectl={{ kubernetes_version }}
+        state: present
+        update_cache: yes
+        
+    - name: Hold Kubernetes packages to prevent automatic updates
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+        
+    - name: Enable kubelet service
+      systemd:
+        name: kubelet
+        enabled: yes
+        daemon_reload: yes
+        
+    - name: Configure kubelet with node IP
+      lineinfile:
+        path: /etc/default/kubelet
+        line: 'KUBELET_EXTRA_ARGS=--node-ip={{ ansible_default_ipv4.address }}'
+        create: yes
+      notify: restart kubelet
+      
+    - name: Create kubectl completion for root
+      shell: kubectl completion bash > /etc/bash_completion.d/kubectl
+      args:
+        creates: /etc/bash_completion.d/kubectl
+        
+    - name: Verify containerd is running
+      systemd:
+        name: containerd
+        state: started
+      register: containerd_status
+      
+    - name: Display containerd status
+      debug:
+        msg: "containerd service is {{ containerd_status.status.ActiveState }}"
+        
+    - name: Verify kubelet is enabled
+      systemd:
+        name: kubelet
+        enabled: yes
+      register: kubelet_status
+      
+    - name: Display kubelet status
+      debug:
+        msg: "kubelet service is enabled: {{ kubelet_status.enabled }}"
+        
+  handlers:
+    - name: restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
+        daemon_reload: yes

@@ -1,0 +1,15 @@
+[k8s_manager]
+10.10.1.1 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+
+[k8s_nodes]
+10.10.1.10 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+10.10.1.11 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+10.10.1.12 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+
+[k8s_cluster:children]
+k8s_manager
+k8s_nodes
+
+[k8s_cluster:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'

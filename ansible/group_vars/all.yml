@@ -1,0 +1,84 @@
+---
+# Global variables for Kubernetes cluster configuration
+
+# Kubernetes Configuration
+kubernetes_version: "1.28.2-1.1"
+kubernetes_cni: "calico"  # Options: calico, flannel
+kubernetes_pod_subnet: "192.168.0.0/16"
+kubernetes_service_subnet: "10.96.0.0/12"
+
+# Container Runtime Configuration
+container_runtime: "containerd"
+containerd_version: "1.7.2"
+
+# Network Configuration
+cluster_name: "sit-spark-k8s"
+api_server_advertise_address: "{{ groups['k8s_manager'][0] }}"
+api_server_bind_port: 6443
+
+# Node Configuration
+node_labels: {}
+node_taints: []
+
+# System Configuration
+disable_swap: true
+enable_ip_forward: true
+
+# Required kernel modules for Kubernetes
+kernel_modules:
+  - overlay
+  - br_netfilter
+
+# Sysctl parameters for Kubernetes
+sysctl_params:
+  net.bridge.bridge-nf-call-iptables: 1
+  net.bridge.bridge-nf-call-ip6tables: 1
+  net.ipv4.ip_forward: 1
+
+# Package repositories
+kubernetes_apt_key_url: "https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key"
+kubernetes_apt_repository: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+
+docker_apt_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+docker_apt_repository: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+
+# Calico Configuration (if using Calico CNI)
+calico_version: "v3.26.1"
+calico_manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml"
+calico_custom_resources_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/custom-resources.yaml"
+
+# Flannel Configuration (if using Flannel CNI)
+flannel_version: "v0.22.0"
+flannel_manifest_url: "https://github.com/flannel-io/flannel/releases/download/{{ flannel_version }}/kube-flannel.yml"
+
+# Timeouts and retries
+kubectl_wait_timeout: "300s"
+node_ready_timeout: 600
+join_retry_count: 3
+
+# Security settings
+allow_privileged: true
+audit_log_enabled: false
+
+# Backup and maintenance
+etcd_backup_enabled: false
+cluster_backup_schedule: "0 2 * * *"
+
+# Helm Configuration
+helm_version: "v3.13.1"
+helm_install_dir: "/usr/local/bin"
+helm_config_dir: "/root/.config/helm"
+helm_repositories:
+  - name: "stable"
+    url: "https://charts.helm.sh/stable"
+  - name: "ingress-nginx"
+    url: "https://kubernetes.github.io/ingress-nginx"
+  - name: "bitnami"
+    url: "https://charts.bitnami.com/bitnami"
+
+# nginx-ingress-controller Configuration
+nginx_ingress_namespace: "ingress-nginx"
+nginx_ingress_chart_version: "4.8.3"
+nginx_ingress_service_type: "NodePort"  # Options: NodePort, LoadBalancer, ClusterIP
+nginx_ingress_node_port_http: 30080
+nginx_ingress_node_port_https: 30443

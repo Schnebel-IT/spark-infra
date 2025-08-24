@@ -1,0 +1,248 @@
+---
+# Kubernetes worker nodes setup - join nodes to the cluster
+- name: Join worker nodes to Kubernetes cluster
+  hosts: k8s_nodes
+  become: yes
+  gather_facts: yes
+  serial: 1  # Join nodes one at a time to avoid race conditions
+  
+  vars:
+    kubeconfig_path: /etc/kubernetes/kubelet.conf
+    
+  tasks:
+    - name: Check if node is already part of a cluster
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubelet_conf
+      
+    - name: Display node join status
+      debug:
+        msg: "Node {{ inventory_hostname }} already joined: {{ kubelet_conf.stat.exists }}"
+      
+    - name: Get cluster join information from manager
+      set_fact:
+        join_command: "{{ hostvars['cluster_info']['join_command'] }}"
+        join_token: "{{ hostvars['cluster_info']['join_token'] }}"
+        discovery_hash: "{{ hostvars['cluster_info']['discovery_hash'] }}"
+        api_server: "{{ hostvars['cluster_info']['api_server'] }}"
+      when: not kubelet_conf.stat.exists
+      
+    - name: Verify join command is available
+      fail:
+        msg: "Join command not available. Ensure the manager node has been initialized first."
+      when: not kubelet_conf.stat.exists and (join_command is not defined or join_command == "")
+      
+    - name: Test connectivity to API server
+      wait_for:
+        host: "{{ api_server.split(':')[0] }}"
+        port: "{{ api_server.split(':')[1] }}"
+        timeout: 30
+      when: not kubelet_conf.stat.exists
+      
+    - name: Join node to Kubernetes cluster
+      shell: "{{ join_command }} --node-name={{ inventory_hostname }} --v=5"
+      register: kubeadm_join
+      when: not kubelet_conf.stat.exists
+      failed_when: kubeadm_join.rc != 0
+      retries: "{{ join_retry_count | default(3) }}"
+      delay: 10
+      
+    - name: Display kubeadm join output
+      debug:
+        var: kubeadm_join.stdout_lines
+      when: kubeadm_join is defined and kubeadm_join.changed
+      
+    - name: Verify kubelet configuration was created
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubelet_conf_after_join
+      when: kubeadm_join is defined and kubeadm_join.changed
+      
+    - name: Fail if node join did not create kubelet.conf
+      fail:
+        msg: "Node join failed - kubelet.conf not found"
+      when: kubeadm_join is defined and kubeadm_join.changed and not kubelet_conf_after_join.stat.exists
+      
+    - name: Wait for kubelet to be ready
+      systemd:
+        name: kubelet
+        state: started
+      register: kubelet_service
+      retries: 5
+      delay: 10
+      until: kubelet_service.status.ActiveState == "active"
+      
+    - name: Wait for node to be ready (check from manager)
+      delegate_to: "{{ groups['k8s_manager'][0] }}"
+      shell: kubectl get node {{ inventory_hostname }} --no-headers | awk '{print $2}'
+      register: node_status
+      until: node_status.stdout == "Ready"
+      retries: 30
+      delay: 10
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      when: kubeadm_join is defined and kubeadm_join.changed
+      
+    - name: Configure node labels if specified
+      delegate_to: "{{ groups['k8s_manager'][0] }}"
+      shell: kubectl label node {{ inventory_hostname }} {{ item.key }}={{ item.value }} --overwrite
+      loop: "{{ node_labels | dict2items }}"
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      when: node_labels is defined and node_labels | length > 0
+      ignore_errors: yes
+      
+    - name: Configure node taints if specified
+      delegate_to: "{{ groups['k8s_manager'][0] }}"
+      shell: kubectl taint node {{ inventory_hostname }} {{ item }} --overwrite
+      loop: "{{ node_taints }}"
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      when: node_taints is defined and node_taints | length > 0
+      ignore_errors: yes
+
+# Verification tasks run after all nodes have joined
+- name: Verify cluster membership and connectivity
+  hosts: k8s_manager
+  become: yes
+  gather_facts: no
+  
+  tasks:
+    - name: Wait for all nodes to be ready
+      shell: kubectl get nodes --no-headers | grep -v Ready | wc -l
+      register: nodes_not_ready
+      until: nodes_not_ready.stdout == "0"
+      retries: 30
+      delay: 10
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+        
+    - name: Get cluster node status
+      shell: kubectl get nodes -o wide
+      register: cluster_nodes
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+        
+    - name: Display cluster status
+      debug:
+        msg: |
+          Cluster Status After Node Join:
+          {{ cluster_nodes.stdout }}
+          
+    - name: Verify expected number of nodes
+      shell: kubectl get nodes --no-headers | wc -l
+      register: total_nodes
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+        
+    - name: Check if all expected nodes are present
+      assert:
+        that:
+          - total_nodes.stdout | int == (groups['k8s_manager'] | length + groups['k8s_nodes'] | length)
+        fail_msg: "Expected {{ groups['k8s_manager'] | length + groups['k8s_nodes'] | length }} nodes, but found {{ total_nodes.stdout }}"
+        success_msg: "All {{ total_nodes.stdout }} nodes are present in the cluster"
+        
+    - name: Test pod scheduling on worker nodes
+      shell: |
+        kubectl run test-pod-{{ ansible_date_time.epoch }} \
+          --image=nginx:alpine \
+          --restart=Never \
+          --rm -i --tty=false \
+          --timeout=60s \
+          --command -- /bin/sh -c "echo 'Node connectivity test successful'"
+      register: test_pod_result
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      ignore_errors: yes
+      
+    - name: Display pod scheduling test result
+      debug:
+        msg: |
+          Pod Scheduling Test: {{ 'PASSED' if test_pod_result.rc == 0 else 'FAILED' }}
+          {% if test_pod_result.rc != 0 %}
+          Error: {{ test_pod_result.stderr }}
+          {% endif %}
+          
+    - name: Verify cluster networking between nodes
+      shell: |
+        kubectl get pods -A -o wide --field-selector=status.phase=Running | \
+        grep -E "(calico|flannel|coredns)" | wc -l
+      register: network_pods_count
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+        
+    - name: Check network pod distribution
+      debug:
+        msg: "Network pods running: {{ network_pods_count.stdout }}"
+        
+    - name: Get cluster component status
+      shell: kubectl get componentstatuses
+      register: component_status
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      ignore_errors: yes
+      
+    - name: Display component status
+      debug:
+        var: component_status.stdout_lines
+      when: component_status.rc == 0
+      
+    - name: Create cluster join summary
+      debug:
+        msg: |
+          ========================================
+          KUBERNETES CLUSTER JOIN SUMMARY
+          ========================================
+          
+          Cluster Name: {{ cluster_name }}
+          Total Nodes: {{ total_nodes.stdout }}
+          - Manager Nodes: {{ groups['k8s_manager'] | length }}
+          - Worker Nodes: {{ groups['k8s_nodes'] | length }}
+          
+          All nodes successfully joined and are Ready!
+          
+          Next Steps:
+          1. Install Helm and ingress controller (Task 4.1-4.3)
+          2. Deploy sample applications for testing
+          3. Configure monitoring and observability
+          
+          Use 'kubectl get nodes' to view cluster status
+          Use 'kubectl get pods -A' to view all system pods
+          ========================================
+
+# Additional connectivity tests from worker nodes
+- name: Test node-to-node connectivity from worker nodes
+  hosts: k8s_nodes
+  become: yes
+  gather_facts: no
+  
+  tasks:
+    - name: Test connectivity to manager node
+      wait_for:
+        host: "{{ groups['k8s_manager'][0] }}"
+        port: 6443
+        timeout: 10
+      register: manager_connectivity
+      
+    - name: Test connectivity to other worker nodes
+      wait_for:
+        host: "{{ item }}"
+        port: 22
+        timeout: 5
+      loop: "{{ groups['k8s_nodes'] }}"
+      when: item != inventory_hostname
+      register: worker_connectivity
+      
+    - name: Verify kubelet is running and healthy
+      systemd:
+        name: kubelet
+        state: started
+      register: kubelet_health
+      
+    - name: Display node connectivity status
+      debug:
+        msg: |
+          Node {{ inventory_hostname }} Connectivity Status:
+          - Manager ({{ groups['k8s_manager'][0] }}:6443): {{ 'OK' if manager_connectivity.elapsed is defined else 'FAILED' }}
+          - Kubelet Service: {{ kubelet_health.status.ActiveState }}
+          - Node is part of cluster: {{ kubelet_conf.stat.exists }}

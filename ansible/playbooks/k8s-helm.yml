@@ -1,0 +1,189 @@
+---
+# Helm installation and configuration on Kubernetes manager
+- name: Install and configure Helm 3
+  hosts: k8s_manager
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    kubeconfig_path: /etc/kubernetes/admin.conf
+    
+  tasks:
+    - name: Check if Helm is already installed
+      stat:
+        path: "{{ helm_install_dir }}/helm"
+      register: helm_binary
+      
+    - name: Display Helm installation status
+      debug:
+        msg: "Helm already installed: {{ helm_binary.stat.exists }}"
+      
+    - name: Download Helm installation script
+      get_url:
+        url: "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3"
+        dest: /tmp/get_helm.sh
+        mode: '0755'
+      when: not helm_binary.stat.exists
+      
+    - name: Install Helm 3
+      shell: |
+        export HELM_INSTALL_DIR={{ helm_install_dir }}
+        export DESIRED_VERSION={{ helm_version }}
+        /tmp/get_helm.sh
+      environment:
+        HELM_INSTALL_DIR: "{{ helm_install_dir }}"
+        DESIRED_VERSION: "{{ helm_version }}"
+      when: not helm_binary.stat.exists
+      register: helm_install_result
+      
+    - name: Verify Helm installation
+      shell: "{{ helm_install_dir }}/helm version --short"
+      register: helm_version_output
+      failed_when: helm_version_output.rc != 0
+      
+    - name: Display Helm version
+      debug:
+        msg: "Installed Helm version: {{ helm_version_output.stdout }}"
+        
+    - name: Create Helm configuration directory for root
+      file:
+        path: "{{ helm_config_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+        
+    - name: Create Helm configuration directory for ubuntu user
+      file:
+        path: "/home/ubuntu/.config/helm"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+        
+    - name: Initialize Helm (create default config)
+      shell: "{{ helm_install_dir }}/helm repo list"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: helm_repo_list
+      failed_when: false
+      changed_when: false
+      
+    - name: Add Helm repositories
+      shell: "{{ helm_install_dir }}/helm repo add {{ item.name }} {{ item.url }}"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      loop: "{{ helm_repositories }}"
+      register: helm_repo_add
+      failed_when: helm_repo_add.rc != 0 and "already exists" not in helm_repo_add.stderr
+      changed_when: helm_repo_add.rc == 0
+      
+    - name: Update Helm repositories
+      shell: "{{ helm_install_dir }}/helm repo update"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: helm_repo_update
+      
+    - name: Display Helm repository update result
+      debug:
+        msg: "{{ helm_repo_update.stdout_lines }}"
+        
+    - name: List configured Helm repositories
+      shell: "{{ helm_install_dir }}/helm repo list"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: helm_repos_configured
+      
+    - name: Display configured repositories
+      debug:
+        msg: |
+          Configured Helm repositories:
+          {{ helm_repos_configured.stdout }}
+          
+    - name: Create Helm security configuration
+      copy:
+        content: |
+          # Helm security configuration
+          # Disable automatic plugin installation
+          export HELM_PLUGIN_DIR={{ helm_config_dir }}/plugins
+          
+          # Set secure permissions for Helm cache
+          export HELM_CACHE_HOME={{ helm_config_dir }}/cache
+          export HELM_CONFIG_HOME={{ helm_config_dir }}
+          export HELM_DATA_HOME={{ helm_config_dir }}/data
+          
+          # Enable Helm security features
+          export HELM_EXPERIMENTAL_OCI=1
+        dest: /etc/profile.d/helm-security.sh
+        mode: '0644'
+        
+    - name: Create Helm cache directories with secure permissions
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop:
+        - "{{ helm_config_dir }}/cache"
+        - "{{ helm_config_dir }}/data"
+        - "{{ helm_config_dir }}/plugins"
+        
+    - name: Create Helm cache directories for ubuntu user
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0700'
+      loop:
+        - "/home/ubuntu/.config/helm/cache"
+        - "/home/ubuntu/.config/helm/data"
+        - "/home/ubuntu/.config/helm/plugins"
+        
+    - name: Create Helm wrapper script for easier usage
+      copy:
+        content: |
+          #!/bin/bash
+          # Helm wrapper script with proper environment
+          export KUBECONFIG={{ kubeconfig_path }}
+          export HELM_CONFIG_HOME={{ helm_config_dir }}
+          export HELM_CACHE_HOME={{ helm_config_dir }}/cache
+          export HELM_DATA_HOME={{ helm_config_dir }}/data
+          
+          {{ helm_install_dir }}/helm "$@"
+        dest: /usr/local/bin/helm-cluster
+        mode: '0755'
+        
+    - name: Test Helm functionality with cluster
+      shell: "{{ helm_install_dir }}/helm list --all-namespaces"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: helm_list_test
+      
+    - name: Display Helm test result
+      debug:
+        msg: |
+          Helm installation and configuration completed successfully!
+          
+          Helm Version: {{ helm_version_output.stdout }}
+          Configured Repositories: {{ helm_repositories | length }}
+          
+          Current Helm releases:
+          {{ helm_list_test.stdout if helm_list_test.stdout else "No releases found (expected for new cluster)" }}
+          
+    - name: Create Helm completion for bash
+      shell: "{{ helm_install_dir }}/helm completion bash > /etc/bash_completion.d/helm"
+      ignore_errors: yes
+      
+    - name: Verify Helm can communicate with Kubernetes cluster
+      shell: "{{ helm_install_dir }}/helm version"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: helm_k8s_version
+      
+    - name: Display Helm and Kubernetes connectivity
+      debug:
+        msg: |
+          Helm and Kubernetes connectivity verified:
+          {{ helm_k8s_version.stdout }}
