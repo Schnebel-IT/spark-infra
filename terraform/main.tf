@@ -1,6 +1,6 @@
 # Kubernetes Manager VM
 resource "proxmox_vm_qemu" "k8s_manager" {
-  name        = "k8s-manager"
+  name        = "spark-k8s-manager"
   vmid        = var.manager_vm_id
   target_node = var.proxmox_node
 
@@ -63,7 +63,7 @@ resource "proxmox_vm_qemu" "k8s_manager" {
 resource "proxmox_vm_qemu" "k8s_nodes" {
   count = length(var.node_vm_ids)
 
-  name        = "k8s-node-${count.index + 1}"
+  name        = "spark-k8s-node-${count.index + 1}"
   vmid        = var.node_vm_ids[count.index]
   target_node = var.proxmox_node
 
