@@ -70,7 +70,7 @@ resource "proxmox_vm_qemu" "k8s_manager" {
   ciupgrade  = true
 
   # IP Configuration
-  ipconfig0 = "ip=${var.manager_ip}/16,gw=${var.network_gateway}"
+  ipconfig1 = "ip=${var.manager_ip}/16,gw=${var.network_gateway}"
   nameserver = var.dns_servers
   skip_ipv6 = true
 
@@ -152,7 +152,7 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   ciupgrade  = true
 
   # IP Configuration
-  ipconfig0 = "ip=${var.node_ips[count.index]}/16,gw=${var.network_gateway}"
+  ipconfig1 = "ip=${var.node_ips[count.index]}/16,gw=${var.network_gateway}"
   nameserver = var.dns_servers
   skip_ipv6 = true
 
