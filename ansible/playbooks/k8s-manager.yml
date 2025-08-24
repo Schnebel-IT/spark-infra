@@ -18,15 +18,32 @@
       debug:
         msg: "Cluster already initialized: {{ admin_conf.stat.exists }}"
       
+    - name: Verify containerd is running before kubeadm init
+      systemd:
+        name: containerd
+        state: started
+      register: containerd_status
+      
+    - name: Check containerd socket
+      stat:
+        path: /var/run/containerd/containerd.sock
+      register: containerd_socket
+      
+    - name: Fail if containerd socket doesn't exist
+      fail:
+        msg: "containerd socket not found at /var/run/containerd/containerd.sock"
+      when: not containerd_socket.stat.exists
+      
     - name: Initialize Kubernetes cluster with kubeadm
       shell: |
         kubeadm init \
-          --apiserver-advertise-address={{ api_server_advertise_address }} \
-          --apiserver-bind-port={{ api_server_bind_port }} \
-          --pod-network-cidr={{ kubernetes_pod_subnet }} \
-          --service-cidr={{ kubernetes_service_subnet }} \
+          --apiserver-advertise-address={{ ansible_default_ipv4.address }} \
+          --apiserver-bind-port=6443 \
+          --pod-network-cidr=192.168.0.0/16 \
+          --service-cidr=10.96.0.0/12 \
           --node-name={{ inventory_hostname }} \
-          --ignore-preflight-errors=NumCPU \
+          --cri-socket=unix:///var/run/containerd/containerd.sock \
+          --ignore-preflight-errors=NumCPU,Swap \
           --v=5
       register: kubeadm_init
       when: not admin_conf.stat.exists
@@ -82,8 +99,8 @@
         
     - name: Wait for kube-apiserver to be ready
       wait_for:
-        port: "{{ api_server_bind_port }}"
-        host: "{{ api_server_advertise_address }}"
+        port: 6443
+        host: "{{ ansible_default_ipv4.address }}"
         delay: 10
         timeout: 300
         
@@ -96,52 +113,41 @@
       delay: 10
       until: cluster_info_output.rc == 0
         
-    - name: Install CNI plugin - Calico
-      block:
-        - name: Download Calico operator manifest
-          get_url:
-            url: "{{ calico_manifest_url }}"
-            dest: /tmp/tigera-operator.yaml
-            mode: '0644'
-            
-        - name: Apply Calico operator
-          shell: kubectl apply -f /tmp/tigera-operator.yaml
-          environment:
-            KUBECONFIG: "{{ kubeconfig_path }}"
-            
-        - name: Download Calico custom resources
-          get_url:
-            url: "{{ calico_custom_resources_url }}"
-            dest: /tmp/custom-resources.yaml
-            mode: '0644'
-            
-        - name: Modify Calico custom resources for pod subnet
-          replace:
-            path: /tmp/custom-resources.yaml
-            regexp: '192\.168\.0\.0/16'
-            replace: "{{ kubernetes_pod_subnet }}"
-            
-        - name: Apply Calico custom resources
-          shell: kubectl apply -f /tmp/custom-resources.yaml
-          environment:
-            KUBECONFIG: "{{ kubeconfig_path }}"
-            
-      when: kubernetes_cni == "calico"
-      
-    - name: Install CNI plugin - Flannel
+    - name: Install CNI plugin - Flannel (default)
       block:
         - name: Download Flannel manifest
-          get_url:
-            url: "{{ flannel_manifest_url }}"
-            dest: /tmp/kube-flannel.yml
-            mode: '0644'
+          shell: curl -fsSL https://github.com/flannel-io/flannel/releases/download/v0.22.0/kube-flannel.yml -o /tmp/kube-flannel.yml
+          args:
+            creates: /tmp/kube-flannel.yml
             
         - name: Apply Flannel CNI
           shell: kubectl apply -f /tmp/kube-flannel.yml
           environment:
             KUBECONFIG: "{{ kubeconfig_path }}"
             
-      when: kubernetes_cni == "flannel"
+        - name: Wait for Flannel pods to be ready
+          shell: kubectl get pods -n kube-flannel --no-headers | grep -v Running | wc -l
+          register: flannel_pods_not_ready
+          until: flannel_pods_not_ready.stdout == "0"
+          retries: 30
+          delay: 10
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
+          ignore_errors: yes
+      
+    - name: Install CNI plugin - Flannel
+      block:
+        - name: Download Flannel manifest
+          shell: curl -fsSL https://github.com/flannel-io/flannel/releases/download/v0.22.0/kube-flannel.yml -o /tmp/kube-flannel.yml
+          args:
+            creates: /tmp/kube-flannel.yml
+            
+        - name: Apply Flannel CNI
+          shell: kubectl apply -f /tmp/kube-flannel.yml
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
+            
+      when: false  # Disabled - using Calico by default
       
     - name: Wait for CNI pods to be ready
       shell: kubectl get pods -n kube-system --no-headers | grep -E "(calico|flannel)" | grep -v Running | wc -l
@@ -219,10 +225,10 @@
           Kubernetes control plane initialized successfully!
           
           Cluster Information:
-          - API Server: {{ api_server_advertise_address }}:{{ api_server_bind_port }}
-          - Pod Subnet: {{ kubernetes_pod_subnet }}
-          - Service Subnet: {{ kubernetes_service_subnet }}
-          - CNI: {{ kubernetes_cni }}
+          - API Server: {{ ansible_default_ipv4.address }}:6443
+          - Pod Subnet: 192.168.0.0/16
+          - Service Subnet: 10.96.0.0/12
+          - CNI: calico
           
           Current Nodes:
           {{ cluster_nodes.stdout }}
@@ -233,12 +239,12 @@
     - name: Create cluster info ConfigMap for debugging
       shell: |
         kubectl create configmap cluster-info \
-          --from-literal=cluster-name="{{ cluster_name }}" \
-          --from-literal=api-server="{{ api_server_advertise_address }}:{{ api_server_bind_port }}" \
-          --from-literal=pod-subnet="{{ kubernetes_pod_subnet }}" \
-          --from-literal=service-subnet="{{ kubernetes_service_subnet }}" \
-          --from-literal=cni="{{ kubernetes_cni }}" \
-          --from-literal=kubernetes-version="{{ kubernetes_version }}" \
+          --from-literal=cluster-name="sit-spark-k8s" \
+          --from-literal=api-server="{{ ansible_default_ipv4.address }}:6443" \
+          --from-literal=pod-subnet="192.168.0.0/16" \
+          --from-literal=service-subnet="10.96.0.0/12" \
+          --from-literal=cni="calico" \
+          --from-literal=kubernetes-version="1.28.2-1.1" \
           --namespace=kube-system \
           --dry-run=client -o yaml | kubectl apply -f -
       environment:
