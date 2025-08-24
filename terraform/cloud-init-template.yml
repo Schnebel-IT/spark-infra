@@ -37,14 +37,14 @@ users:
   - name: ubuntu
     groups: [adm, cdrom, dip, plugdev, lxd, sudo]
     lock_passwd: false
-    passwd: '$6$rounds=4096$saltsalt$L9tjczoIVjNaF.3H.D1KM0cJ3p8QMvXstAK6y6MvMfwIDVkJeMFN4mUcNq8gF5pBtUmvqVukc1VI6cjQYUNVT.'
+    plain_text_passwd: ubuntu
     shell: /bin/bash
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
     ssh_authorized_keys:
       - ${ssh_public_key}
   - name: root
     lock_passwd: false
-    passwd: '$6$rounds=4096$saltsalt$L9tjczoIVjNaF.3H.D1KM0cJ3p8QMvXstAK6y6MvMfwIDVkJeMFN4mUcNq8gF5pBtUmvqVukc1VI6cjQYUNVT.'
+    plain_text_passwd: ubuntu
     ssh_authorized_keys:
       - ${ssh_public_key}
 
