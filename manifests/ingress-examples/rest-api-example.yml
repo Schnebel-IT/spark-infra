@@ -1,0 +1,228 @@
+---
+# REST API application deployment example
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rest-api-app
+  namespace: default
+  labels:
+    app: rest-api-app
+    type: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rest-api-app
+  template:
+    metadata:
+      labels:
+        app: rest-api-app
+        type: backend
+    spec:
+      containers:
+      - name: rest-api
+        image: node:18-alpine
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            cat > /app/package.json << 'EOF'
+            {
+              "name": "rest-api-sample",
+              "version": "1.0.0",
+              "main": "server.js",
+              "scripts": {
+                "start": "node server.js"
+              },
+              "dependencies": {
+                "express": "^4.18.0",
+                "cors": "^2.8.5"
+              }
+            }
+            EOF
+            
+            cat > /app/server.js << 'EOF'
+            const express = require('express');
+            const cors = require('cors');
+            
+            const app = express();
+            const port = process.env.PORT || 3000;
+            
+            app.use(cors());
+            app.use(express.json());
+            
+            // Health check endpoint
+            app.get('/health', (req, res) => {
+              res.json({
+                status: 'healthy',
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime(),
+                environment: process.env.NODE_ENV,
+                version: '1.0.0'
+              });
+            });
+            
+            // API status endpoint
+            app.get('/api/status', (req, res) => {
+              res.json({
+                api: 'REST API Sample',
+                status: 'running',
+                endpoints: [
+                  'GET /health',
+                  'GET /api/status',
+                  'GET /api/users',
+                  'POST /api/users',
+                  'GET /api/metrics'
+                ],
+                timestamp: new Date().toISOString()
+              });
+            });
+            
+            // Sample users endpoint
+            app.get('/api/users', (req, res) => {
+              res.json({
+                users: [
+                  { id: 1, name: 'John Doe', email: 'john@example.com' },
+                  { id: 2, name: 'Jane Smith', email: 'jane@example.com' }
+                ],
+                total: 2,
+                timestamp: new Date().toISOString()
+              });
+            });
+            
+            // Create user endpoint
+            app.post('/api/users', (req, res) => {
+              const { name, email } = req.body;
+              res.status(201).json({
+                id: Math.floor(Math.random() * 1000),
+                name: name || 'Unknown',
+                email: email || 'unknown@example.com',
+                created: new Date().toISOString()
+              });
+            });
+            
+            // Metrics endpoint
+            app.get('/api/metrics', (req, res) => {
+              res.json({
+                requests: Math.floor(Math.random() * 1000),
+                uptime: process.uptime(),
+                memory: process.memoryUsage(),
+                cpu: process.cpuUsage(),
+                timestamp: new Date().toISOString()
+              });
+            });
+            
+            // Root endpoint
+            app.get('/', (req, res) => {
+              res.json({
+                message: 'REST API Sample running on Kubernetes',
+                version: '1.0.0',
+                endpoints: '/api/status',
+                health: '/health'
+              });
+            });
+            
+            app.listen(port, '0.0.0.0', () => {
+              console.log(`REST API server running on port ${port}`);
+            });
+            EOF
+            
+            cd /app
+            npm install
+            npm start
+        workingDir: /app
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rest-api-service
+  namespace: default
+  labels:
+    app: rest-api-app
+spec:
+  selector:
+    app: rest-api-app
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rest-api-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: api.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: rest-api-service
+            port:
+              number: 80
+---
+# Path-based routing for API
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rest-api-paths
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: services.local
+    http:
+      paths:
+      - path: /api(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: rest-api-service
+            port:
+              number: 80

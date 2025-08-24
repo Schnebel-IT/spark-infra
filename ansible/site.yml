@@ -24,7 +24,10 @@
 # Phase 4: Install and configure Helm
 - import_playbook: playbooks/k8s-helm.yml
 
-# Phase 5: Final cluster validation
+# Phase 5: Deploy nginx-ingress-controller
+- import_playbook: playbooks/k8s-ingress.yml
+
+# Phase 6: Final cluster validation
 - name: Validate Kubernetes Cluster
   hosts: k8s_manager
   gather_facts: false

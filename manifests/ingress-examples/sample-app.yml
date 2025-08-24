@@ -1,0 +1,124 @@
+---
+# Sample application for ingress testing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app
+  namespace: default
+  labels:
+    app: sample-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sample-app
+  template:
+    metadata:
+      labels:
+        app: sample-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        volumeMounts:
+        - name: html
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: html
+        configMap:
+          name: sample-app-html
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sample-app-html
+  namespace: default
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Sample Application</title>
+        <style>
+            body { 
+                font-family: Arial, sans-serif; 
+                margin: 40px; 
+                background-color: #f0f8ff;
+            }
+            .header { 
+                color: #2e8b57; 
+                text-align: center;
+            }
+            .info { 
+                background-color: #e6f3ff; 
+                padding: 20px; 
+                border-radius: 5px;
+                margin: 20px 0;
+            }
+            .footer {
+                text-align: center;
+                color: #666;
+                margin-top: 40px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1 class="header">🚀 Sample Application</h1>
+        <div class="info">
+            <h2>Application Information</h2>
+            <p><strong>Status:</strong> Running successfully</p>
+            <p><strong>Environment:</strong> Kubernetes</p>
+            <p><strong>Ingress:</strong> nginx-ingress-controller</p>
+            <p><strong>Namespace:</strong> default</p>
+        </div>
+        <div class="info">
+            <h2>Test Endpoints</h2>
+            <ul>
+                <li><a href="/">Home Page</a></li>
+                <li><a href="/health">Health Check</a></li>
+                <li><a href="/api/status">API Status</a></li>
+            </ul>
+        </div>
+        <div class="footer">
+            <p>Powered by nginx-ingress-controller on Kubernetes</p>
+        </div>
+    </body>
+    </html>
+  health.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Health Check</title>
+    </head>
+    <body>
+        <h1>✅ Health Check: OK</h1>
+        <p>Application is running normally</p>
+        <p>Timestamp: <script>document.write(new Date().toISOString())</script></p>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-app-service
+  namespace: default
+  labels:
+    app: sample-app
+spec:
+  selector:
+    app: sample-app
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP

@@ -110,32 +110,64 @@
   - _Requirements: 3.1_
 
 
-- [ ] 4.2 Implement nginx-ingress-controller deployment
+
+- [x] 4.2 Implement nginx-ingress-controller deployment
+
+
+
+
+
+
+
+
   - Write Helm values file for nginx-ingress-controller configuration
   - Create ansible tasks to deploy ingress controller via Helm
   - Configure external access and load balancer settings
+
+
   - _Requirements: 3.2, 3.3_
 
-- [ ] 4.3 Create ingress validation and testing
+- [x] 4.3 Create ingress validation and testing
+
+
+
+
+
   - Implement test deployments to validate ingress functionality
   - Write validation scripts to check ingress controller health
   - Create sample ingress resources for testing
   - _Requirements: 3.4_
 
-- [ ] 5. Create orchestration and deployment scripts
-- [ ] 5.1 Implement main deployment script
+- [x] 5. Create orchestration and deployment scripts
+
+
+
+
+
+- [x] 5.1 Implement main deployment script
+
+
   - Write scripts/deploy.sh to orchestrate terraform and ansible execution
   - Add error handling and progress reporting
   - Implement prerequisite checks (Proxmox connectivity, credentials)
   - _Requirements: 4.2, 4.3_
 
-- [ ] 5.2 Create cluster validation and health check scripts
+- [x] 5.2 Create cluster validation and health check scripts
+
+
   - Write scripts/validate.sh to verify cluster functionality
   - Implement health checks for all cluster components
   - Create connectivity tests between nodes and external access
   - _Requirements: 2.4, 4.3_
 
-- [ ] 5.3 Implement cleanup and destroy scripts
+
+
+- [x] 5.3 Implement cleanup and destroy scripts
+
+
+
+
+
   - Write scripts/destroy.sh to safely tear down infrastructure
   - Add confirmation prompts and backup procedures
   - Implement selective cleanup options (VMs only, full cleanup)

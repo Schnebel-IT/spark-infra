@@ -17,6 +17,7 @@ packages:
   - htop
   - vim
   - git
+  - openssh-server
 
 # System configuration
 timezone: Europe/Berlin
@@ -28,7 +29,8 @@ manage_etc_hosts: true
 # SSH configuration
 ssh_pwauth: true
 disable_root: false
-ssh_authorized_keys: []
+ssh_deletekeys: false
+ssh_genkeytypes: ['rsa', 'ecdsa', 'ed25519']
 
 # User configuration
 users:
@@ -38,11 +40,23 @@ users:
     passwd: '$6$rounds=4096$saltsalt$L9tjczoIVjNaF.3H.D1KM0cJ3p8QMvXstAK6y6MvMfwIDVkJeMFN4mUcNq8gF5pBtUmvqVukc1VI6cjQYUNVT.'
     shell: /bin/bash
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
-    ssh_authorized_keys: []
+    ssh_authorized_keys:
+      - ${ssh_public_key}
   - name: root
     lock_passwd: false
     passwd: '$6$rounds=4096$saltsalt$L9tjczoIVjNaF.3H.D1KM0cJ3p8QMvXstAK6y6MvMfwIDVkJeMFN4mUcNq8gF5pBtUmvqVukc1VI6cjQYUNVT.'
-    ssh_authorized_keys: []
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+# SSH daemon configuration
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-custom.conf
+    content: |
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+      PermitRootLogin yes
+      AuthorizedKeysFile .ssh/authorized_keys
+    permissions: '0644'
 
 # System tweaks for Kubernetes
 bootcmd:
@@ -59,6 +73,8 @@ runcmd:
   - sysctl --system
   - systemctl enable systemd-resolved
   - systemctl start systemd-resolved
+  - systemctl restart ssh
+  - systemctl enable ssh
 
 # Final reboot to ensure all changes take effect
 power_state:

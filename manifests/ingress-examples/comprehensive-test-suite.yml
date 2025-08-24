@@ -1,0 +1,472 @@
+---
+# Comprehensive Ingress Test Suite
+# This file contains a complete set of test applications and ingress configurations
+# for validating nginx-ingress-controller functionality
+
+# Namespace for all test resources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-test-suite
+  labels:
+    purpose: ingress-testing
+---
+# Test Application 1: Basic Web Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: basic-web-test
+  namespace: ingress-test-suite
+  labels:
+    app: basic-web-test
+    test-type: basic
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: basic-web-test
+  template:
+    metadata:
+      labels:
+        app: basic-web-test
+    spec:
+      containers:
+      - name: web
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: 50m
+            memory: 64Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+        volumeMounts:
+        - name: content
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: content
+        configMap:
+          name: basic-web-content
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: basic-web-content
+  namespace: ingress-test-suite
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Basic Web Test</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; text-align: center; }
+            .success { color: #28a745; }
+        </style>
+    </head>
+    <body>
+        <h1 class="success">✓ Basic Web Test - SUCCESS</h1>
+        <p>This is a basic web application for ingress testing.</p>
+        <p>Host: <span id="host"></span></p>
+        <p>Path: <span id="path"></span></p>
+        <p>Timestamp: <span id="time"></span></p>
+        <script>
+            document.getElementById('host').textContent = window.location.hostname;
+            document.getElementById('path').textContent = window.location.pathname;
+            document.getElementById('time').textContent = new Date().toISOString();
+        </script>
+    </body>
+    </html>
+  health: |
+    OK - Basic Web Test Healthy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: basic-web-service
+  namespace: ingress-test-suite
+spec:
+  selector:
+    app: basic-web-test
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# Test Application 2: API Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-test
+  namespace: ingress-test-suite
+  labels:
+    app: api-test
+    test-type: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-test
+  template:
+    metadata:
+      labels:
+        app: api-test
+    spec:
+      containers:
+      - name: api
+        image: node:18-alpine
+        ports:
+        - containerPort: 3000
+        env:
+        - name: PORT
+          value: "3000"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 20m
+            memory: 64Mi
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            cat > /app/server.js << 'EOF'
+            const http = require('http');
+            const url = require('url');
+            
+            const server = http.createServer((req, res) => {
+              const parsedUrl = url.parse(req.url, true);
+              const path = parsedUrl.pathname;
+              
+              res.setHeader('Content-Type', 'application/json');
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              
+              if (path === '/health') {
+                res.writeHead(200);
+                res.end(JSON.stringify({
+                  status: 'healthy',
+                  service: 'api-test',
+                  timestamp: new Date().toISOString()
+                }));
+              } else if (path === '/api/status') {
+                res.writeHead(200);
+                res.end(JSON.stringify({
+                  api: 'Test API Server',
+                  version: '1.0.0',
+                  status: 'running',
+                  endpoints: ['/health', '/api/status', '/api/data'],
+                  timestamp: new Date().toISOString()
+                }));
+              } else if (path === '/api/data') {
+                res.writeHead(200);
+                res.end(JSON.stringify({
+                  data: [
+                    { id: 1, name: 'Test Item 1' },
+                    { id: 2, name: 'Test Item 2' }
+                  ],
+                  count: 2,
+                  timestamp: new Date().toISOString()
+                }));
+              } else if (path === '/') {
+                res.writeHead(200);
+                res.end(JSON.stringify({
+                  message: 'API Test Server',
+                  available_endpoints: ['/health', '/api/status', '/api/data'],
+                  timestamp: new Date().toISOString()
+                }));
+              } else {
+                res.writeHead(404);
+                res.end(JSON.stringify({
+                  error: 'Not Found',
+                  path: path,
+                  timestamp: new Date().toISOString()
+                }));
+              }
+            });
+            
+            server.listen(3000, '0.0.0.0', () => {
+              console.log('API Test Server running on port 3000');
+            });
+            EOF
+            
+            cd /app && node server.js
+        workingDir: /app
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-test-service
+  namespace: ingress-test-suite
+spec:
+  selector:
+    app: api-test
+  ports:
+    - port: 80
+      targetPort: 3000
+---
+# Test Application 3: Load Test Target
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-test-target
+  namespace: ingress-test-suite
+  labels:
+    app: load-test-target
+    test-type: performance
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: load-test-target
+  template:
+    metadata:
+      labels:
+        app: load-test-target
+    spec:
+      containers:
+      - name: target
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 20m
+            memory: 64Mi
+        volumeMounts:
+        - name: content
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: content
+        configMap:
+          name: load-test-content
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-test-content
+  namespace: ingress-test-suite
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Load Test Target</title>
+    </head>
+    <body>
+        <h1>Load Test Target - Ready</h1>
+        <p>This endpoint is designed for performance testing.</p>
+        <p>Pod: <script>document.write(Math.random().toString(36).substr(2, 9))</script></p>
+        <p>Timestamp: <script>document.write(new Date().toISOString())</script></p>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: load-test-service
+  namespace: ingress-test-suite
+spec:
+  selector:
+    app: load-test-target
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# Basic Host-based Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: basic-host-ingress
+  namespace: ingress-test-suite
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: basic.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: basic-web-service
+            port:
+              number: 80
+---
+# API Host-based Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-host-ingress
+  namespace: ingress-test-suite
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: api.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-test-service
+            port:
+              number: 80
+---
+# Path-based Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: path-based-ingress
+  namespace: ingress-test-suite
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: paths.test
+    http:
+      paths:
+      - path: /web(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: basic-web-service
+            port:
+              number: 80
+      - path: /api(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: api-test-service
+            port:
+              number: 80
+      - path: /load(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+---
+# Multi-host Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: multi-host-ingress
+  namespace: ingress-test-suite
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: web1.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: basic-web-service
+            port:
+              number: 80
+  - host: web2.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: basic-web-service
+            port:
+              number: 80
+  - host: web3.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: basic-web-service
+            port:
+              number: 80
+---
+# Performance Test Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: performance-test-ingress
+  namespace: ingress-test-suite
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/rate-limit: "1000"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: perf.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+---
+# Annotation Test Ingress (various nginx annotations)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: annotation-test-ingress
+  namespace: ingress-test-suite
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "5m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/client-body-buffer-size: "1m"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization, X-Requested-With"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: annotations.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-test-service
+            port:
+              number: 80

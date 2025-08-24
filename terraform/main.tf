@@ -1,3 +1,11 @@
+# Create cloud-init user-data file with SSH key
+resource "local_file" "cloud_init_user_data" {
+  content = templatefile("${path.module}/cloud-init-template.yml", {
+    ssh_public_key = var.ssh_public_key
+  })
+  filename = "${path.module}/cloud-init/user-data-k8s.yml"
+}
+
 # Kubernetes Manager VM
 resource "proxmox_vm_qemu" "k8s_manager" {
   name        = "spark-k8s-manager"
@@ -5,10 +13,10 @@ resource "proxmox_vm_qemu" "k8s_manager" {
   target_node = var.proxmox_node
 
   # VM Configuration
-  memory  = var.vm_memory
+  memory = var.vm_memory
   cpu {
     sockets = 1
-    cores = var.vm_cpu
+    cores   = var.vm_cpu
   }
 
   # Boot and OS Configuration
@@ -28,10 +36,10 @@ resource "proxmox_vm_qemu" "k8s_manager" {
     scsi {
       scsi0 {
         disk {
-          size = var.vm_disk_size
-          cache = "writeback"
+          size    = var.vm_disk_size
+          cache   = "writeback"
           storage = "local"
-          format = "raw"
+          format  = "raw"
         }
       }
     }
@@ -71,6 +79,8 @@ resource "proxmox_vm_qemu" "k8s_manager" {
       network,
     ]
   }
+
+  depends_on = [local_file.cloud_init_user_data]
 }
 
 # Kubernetes Worker Nodes
@@ -82,10 +92,10 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   target_node = var.proxmox_node
 
   # VM Configuration
-  memory  = var.vm_memory
+  memory = var.vm_memory
   cpu {
     sockets = 1
-    cores = var.vm_cpu
+    cores   = var.vm_cpu
   }
 
   # Boot and OS Configuration
@@ -105,10 +115,10 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
     scsi {
       scsi0 {
         disk {
-          size = var.vm_disk_size
-          cache = "writeback"
+          size    = var.vm_disk_size
+          cache   = "writeback"
           storage = "local"
-          format = "raw"
+          format  = "raw"
         }
       }
     }
@@ -149,5 +159,5 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
     ]
   }
 
-  depends_on = [proxmox_vm_qemu.k8s_manager]
+  depends_on = [proxmox_vm_qemu.k8s_manager, local_file.cloud_init_user_data]
 }

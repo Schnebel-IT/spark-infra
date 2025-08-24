@@ -1,0 +1,147 @@
+---
+# NextJS application deployment example
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextjs-app
+  namespace: default
+  labels:
+    app: nextjs-app
+    type: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nextjs-app
+  template:
+    metadata:
+      labels:
+        app: nextjs-app
+        type: frontend
+    spec:
+      containers:
+      - name: nextjs
+        image: node:18-alpine
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            cat > /app/package.json << 'EOF'
+            {
+              "name": "nextjs-sample",
+              "version": "1.0.0",
+              "scripts": {
+                "dev": "next dev",
+                "build": "next build",
+                "start": "next start"
+              },
+              "dependencies": {
+                "next": "^13.0.0",
+                "react": "^18.0.0",
+                "react-dom": "^18.0.0"
+              }
+            }
+            EOF
+            
+            mkdir -p /app/pages
+            cat > /app/pages/index.js << 'EOF'
+            export default function Home() {
+              return (
+                <div style={{fontFamily: 'Arial, sans-serif', padding: '40px', textAlign: 'center'}}>
+                  <h1 style={{color: '#0070f3'}}>🚀 NextJS on Kubernetes</h1>
+                  <p>This NextJS application is running on Kubernetes with nginx-ingress</p>
+                  <div style={{backgroundColor: '#f0f8ff', padding: '20px', borderRadius: '5px', margin: '20px 0'}}>
+                    <h2>Environment Information</h2>
+                    <p><strong>Framework:</strong> NextJS</p>
+                    <p><strong>Runtime:</strong> Node.js</p>
+                    <p><strong>Platform:</strong> Kubernetes</p>
+                    <p><strong>Ingress:</strong> nginx-ingress-controller</p>
+                  </div>
+                </div>
+              )
+            }
+            EOF
+            
+            cat > /app/pages/api/health.js << 'EOF'
+            export default function handler(req, res) {
+              res.status(200).json({
+                status: 'healthy',
+                timestamp: new Date().toISOString(),
+                environment: process.env.NODE_ENV,
+                version: '1.0.0'
+              })
+            }
+            EOF
+            
+            cd /app
+            npm install
+            npm run build
+            npm start
+        workingDir: /app
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextjs-service
+  namespace: default
+  labels:
+    app: nextjs-app
+spec:
+  selector:
+    app: nextjs-app
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nextjs-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: nextjs.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nextjs-service
+            port:
+              number: 80

@@ -1,0 +1,336 @@
+---
+# Advanced ingress testing scenarios
+# This file contains various ingress configurations for comprehensive testing
+
+# Test application with multiple endpoints
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress-test-advanced
+  namespace: default
+  labels:
+    app: ingress-test-advanced
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ingress-test-advanced
+  template:
+    metadata:
+      labels:
+        app: ingress-test-advanced
+    spec:
+      containers:
+      - name: test-server
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 20m
+            memory: 32Mi
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+        - name: html-content
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: advanced-nginx-config
+      - name: html-content
+        configMap:
+          name: advanced-html-content
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: advanced-nginx-config
+  namespace: default
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name localhost;
+        
+        # Root location
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+        }
+        
+        # API simulation
+        location /api/ {
+            root /usr/share/nginx/html;
+            try_files $uri $uri/ /api/index.html;
+        }
+        
+        # Health check
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+        
+        # Status endpoint
+        location /status {
+            stub_status on;
+            access_log off;
+        }
+        
+        # Large file test
+        location /large {
+            root /usr/share/nginx/html;
+            try_files /large.html =404;
+        }
+        
+        # Slow endpoint simulation
+        location /slow {
+            root /usr/share/nginx/html;
+            try_files /slow.html =404;
+        }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: advanced-html-content
+  namespace: default
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Advanced Ingress Test</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+            .success { color: #28a745; }
+            .info { color: #17a2b8; }
+            .endpoint { background: #e9ecef; padding: 10px; margin: 10px 0; border-radius: 4px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1 class="success">✓ Advanced Ingress Test Application</h1>
+            <p class="info">This application tests various ingress scenarios and configurations.</p>
+            
+            <h2>Available Endpoints:</h2>
+            <div class="endpoint"><strong>GET /</strong> - This page</div>
+            <div class="endpoint"><strong>GET /health</strong> - Health check</div>
+            <div class="endpoint"><strong>GET /status</strong> - Nginx status</div>
+            <div class="endpoint"><strong>GET /api/</strong> - API simulation</div>
+            <div class="endpoint"><strong>GET /large</strong> - Large content test</div>
+            <div class="endpoint"><strong>GET /slow</strong> - Slow response test</div>
+            
+            <h2>Test Information:</h2>
+            <p><strong>Hostname:</strong> <span id="hostname">Loading...</span></p>
+            <p><strong>Timestamp:</strong> <span id="timestamp"></span></p>
+            <p><strong>User Agent:</strong> <span id="useragent"></span></p>
+            
+            <script>
+                document.getElementById('hostname') = window.location.hostname;
+                document.getElementById('timestamp').textContent = new Date().toISOString();
+                document.getElementById('useragent').textContent = navigator.userAgent;
+            </script>
+        </div>
+    </body>
+    </html>
+  api/index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>API Endpoint</title>
+    </head>
+    <body>
+        <h1>API Endpoint Test</h1>
+        <p>This simulates an API endpoint accessible via ingress.</p>
+        <p>Path: /api/</p>
+        <p>Status: Active</p>
+        <p>Timestamp: <script>document.write(new Date().toISOString())</script></p>
+    </body>
+    </html>
+  large.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Large Content Test</title>
+    </head>
+    <body>
+        <h1>Large Content Test</h1>
+        <p>This page tests ingress handling of larger content.</p>
+        <!-- Generate large content for testing -->
+        <div style="font-family: monospace; font-size: 12px;">
+        <!-- Repeat content to make it large -->
+        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+        
+        Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.
+        
+        At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga.
+        </div>
+    </body>
+    </html>
+  slow.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Slow Response Test</title>
+        <script>
+            // Simulate slow loading
+            setTimeout(function() {
+                document.getElementById('content').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+            }, 2000);
+        </script>
+    </head>
+    <body>
+        <div id="loading">
+            <h1>Loading...</h1>
+            <p>Simulating slow response for timeout testing.</p>
+        </div>
+        <div id="content" style="display: none;">
+            <h1>Slow Response Test Complete</h1>
+            <p>This page loaded after a 2-second delay.</p>
+            <p>Useful for testing ingress timeout configurations.</p>
+        </div>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-test-advanced-service
+  namespace: default
+spec:
+  selector:
+    app: ingress-test-advanced
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP
+---
+# Basic host-based ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: advanced-test-basic
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: advanced.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ingress-test-advanced-service
+            port:
+              number: 80
+---
+# Path-based routing with rewrite
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: advanced-test-paths
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: paths.local
+    http:
+      paths:
+      - path: /app(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: ingress-test-advanced-service
+            port:
+              number: 80
+      - path: /service(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: ingress-test-advanced-service
+            port:
+              number: 80
+---
+# Ingress with custom annotations for testing
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: advanced-test-annotations
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: annotated.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ingress-test-advanced-service
+            port:
+              number: 80
+---
+# Ingress with multiple hosts
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: advanced-test-multihost
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: test1.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ingress-test-advanced-service
+            port:
+              number: 80
+  - host: test2.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ingress-test-advanced-service
+            port:
+              number: 80
+  - host: test3.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ingress-test-advanced-service
+            port:
+              number: 80
