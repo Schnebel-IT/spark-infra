@@ -87,12 +87,6 @@ variable "network_gateway" {
   default     = "10.10.0.1"
 }
 
-variable "dns_servers" {
-  description = "DNS servers for VMs"
-  type        = string
-  default     = "8.8.8.8 1.1.1.1"
-}
-
 variable "ssh_public_key" {
   description = "SSH public key for VM access"
   type        = string
