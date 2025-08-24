@@ -22,9 +22,13 @@ packages:
 # System configuration
 timezone: Europe/Berlin
 locale: en_US.UTF-8
+hostname: ${hostname}
+fqdn: ${hostname}.local
 
-# Network configuration
-manage_etc_hosts: true
+# Network configuration - let Proxmox handle IP configuration
+manage_etc_hosts: localhost
+network:
+  config: disabled
 
 # SSH configuration
 ssh_pwauth: true
