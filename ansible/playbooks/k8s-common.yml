@@ -5,6 +5,16 @@
   become: yes
   gather_facts: yes
   
+  vars:
+    # Fallback variables in case group_vars are not loaded
+    kernel_modules:
+      - overlay
+      - br_netfilter
+    sysctl_params:
+      net.bridge.bridge-nf-call-iptables: 1
+      net.bridge.bridge-nf-call-ip6tables: 1
+      net.ipv4.ip_forward: 1
+  
   tasks:
     - name: Update system packages
       apt:
@@ -43,18 +53,14 @@
       modprobe:
         name: "{{ item }}"
         state: present
-      loop: 
-        - overlay
-        - br_netfilter
+      loop: "{{ kernel_modules }}"
       
     - name: Ensure kernel modules are loaded at boot
       lineinfile:
         path: /etc/modules-load.d/k8s.conf
         line: "{{ item }}"
         create: yes
-      loop:
-        - overlay
-        - br_netfilter
+      loop: "{{ kernel_modules }}"
       
     - name: Configure sysctl parameters for Kubernetes
       sysctl:

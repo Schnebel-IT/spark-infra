@@ -7,6 +7,16 @@
   
   vars:
     kubeconfig_path: /etc/kubernetes/admin.conf
+    helm_install_dir: /usr/local/bin
+    helm_config_dir: /root/.config/helm
+    helm_version: v3.12.3
+    helm_repositories:
+      - name: stable
+        url: https://charts.helm.sh/stable
+      - name: bitnami
+        url: https://charts.bitnami.com/bitnami
+      - name: ingress-nginx
+        url: https://kubernetes.github.io/ingress-nginx
     
   tasks:
     - name: Check if Helm is already installed
@@ -19,24 +29,26 @@
         msg: "Helm already installed: {{ helm_binary.stat.exists }}"
       
     - name: Download Helm installation script
-      shell: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 -o /tmp/get_helm.sh && chmod +x /tmp/get_helm.sh
+      shell: |
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 -o /tmp/get_helm.sh
+        chmod +x /tmp/get_helm.sh
       args:
         creates: /tmp/get_helm.sh
       when: not helm_binary.stat.exists
       
     - name: Install Helm 3
       shell: |
-        export HELM_INSTALL_DIR=/usr/local/bin
-        export DESIRED_VERSION=v3.13.1
+        export HELM_INSTALL_DIR={{ helm_install_dir }}
+        export DESIRED_VERSION={{ helm_version }}
         /tmp/get_helm.sh
       environment:
-        HELM_INSTALL_DIR: "/usr/local/bin"
-        DESIRED_VERSION: "v3.13.1"
+        HELM_INSTALL_DIR: "{{ helm_install_dir }}"
+        DESIRED_VERSION: "{{ helm_version }}"
       when: not helm_binary.stat.exists
       register: helm_install_result
       
     - name: Verify Helm installation
-      shell: "/usr/local/bin/helm version --short"
+      shell: "{{ helm_install_dir }}/helm version --short"
       register: helm_version_output
       failed_when: helm_version_output.rc != 0
       
@@ -46,7 +58,7 @@
         
     - name: Create Helm configuration directory for root
       file:
-        path: "/root/.config/helm"
+        path: "{{ helm_config_dir }}"
         state: directory
         owner: root
         group: root
@@ -61,7 +73,7 @@
         mode: '0755'
         
     - name: Initialize Helm (create default config)
-      shell: "/usr/local/bin/helm repo list"
+      shell: "{{ helm_install_dir }}/helm repo list"
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
       register: helm_repo_list

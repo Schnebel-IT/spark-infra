@@ -8,18 +8,21 @@
   vars:
     kubeconfig_path: /etc/kubernetes/admin.conf
     helm_binary: "{{ helm_install_dir }}/helm"
+    nginx_ingress_namespace: ingress-nginx
+    nginx_ingress_chart_version: 4.7.1
+    helm_install_dir: /usr/local/bin
     
   tasks:
     - name: Create ingress-nginx namespace
       shell: |
-        {{ helm_binary }} repo update
+        /usr/local/bin/helm repo update
         kubectl create namespace {{ nginx_ingress_namespace }} --dry-run=client -o yaml | kubectl apply -f -
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
       register: namespace_creation
       
     - name: Check if nginx-ingress-controller is already installed
-      shell: "{{ helm_binary }} list -n {{ nginx_ingress_namespace }} -o json"
+      shell: "/usr/local/bin/helm list -n {{ nginx_ingress_namespace }} -o json"
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
       register: helm_list_ingress
@@ -34,13 +37,13 @@
         
     - name: Copy nginx-ingress Helm values file
       copy:
-        src: nginx-ingress-values.yml
+        src: /root/spark-infra/ansible/files/nginx-ingress-values.yml
         dest: /tmp/nginx-ingress-values.yml
         mode: '0644'
         
     - name: Install nginx-ingress-controller via Helm
       shell: |
-        {{ helm_binary }} install ingress-nginx ingress-nginx/ingress-nginx \
+        /usr/local/bin/helm install ingress-nginx ingress-nginx/ingress-nginx \
           --namespace {{ nginx_ingress_namespace }} \
           --version {{ nginx_ingress_chart_version }} \
           --values /tmp/nginx-ingress-values.yml \
@@ -53,7 +56,7 @@
       
     - name: Upgrade nginx-ingress-controller if already installed
       shell: |
-        {{ helm_binary }} upgrade ingress-nginx ingress-nginx/ingress-nginx \
+        /usr/local/bin/helm upgrade ingress-nginx ingress-nginx/ingress-nginx \
           --namespace {{ nginx_ingress_namespace }} \
           --version {{ nginx_ingress_chart_version }} \
           --values /tmp/nginx-ingress-values.yml \

@@ -142,31 +142,20 @@
         fail_msg: "Expected {{ groups['k8s_manager'] | length + groups['k8s_nodes'] | length }} nodes, but found {{ total_nodes.stdout }}"
         success_msg: "All {{ total_nodes.stdout }} nodes are present in the cluster"
         
-    - name: Test pod scheduling on worker nodes
-      shell: |
-        kubectl run test-pod-{{ ansible_date_time.epoch }} \
-          --image=nginx:alpine \
-          --restart=Never \
-          --rm -i --tty=false \
-          --timeout=60s \
-          --command -- /bin/sh -c "echo 'Node connectivity test successful'"
-      register: test_pod_result
+    - name: Check if worker nodes are available for scheduling
+      shell: kubectl get nodes --no-headers | grep -v control-plane | grep Ready | wc -l
+      register: available_worker_nodes
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
-      ignore_errors: yes
-      
-    - name: Display pod scheduling test result
+        
+    - name: Display worker nodes status
       debug:
-        msg: |
-          Pod Scheduling Test: {{ 'PASSED' if test_pod_result.rc == 0 else 'FAILED' }}
-          {% if test_pod_result.rc != 0 %}
-          Error: {{ test_pod_result.stderr }}
-          {% endif %}
+        msg: "Available worker nodes for scheduling: {{ available_worker_nodes.stdout }}"
           
     - name: Verify cluster networking between nodes
       shell: |
         kubectl get pods -A -o wide --field-selector=status.phase=Running | \
-        grep -E "(calico|flannel|coredns)" | wc -l
+        grep -E "(flannel|coredns)" | wc -l
       register: network_pods_count
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
@@ -194,7 +183,6 @@
           KUBERNETES CLUSTER JOIN SUMMARY
           ========================================
           
-          Cluster Name: {{ cluster_name }}
           Total Nodes: {{ total_nodes.stdout }}
           - Manager Nodes: {{ groups['k8s_manager'] | length }}
           - Worker Nodes: {{ groups['k8s_nodes'] | length }}

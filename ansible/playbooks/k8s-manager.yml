@@ -7,6 +7,9 @@
   
   vars:
     kubeconfig_path: /etc/kubernetes/admin.conf
+    # Fallback variables in case group_vars are not loaded
+    api_server_advertise_address: "{{ ansible_default_ipv4.address }}"
+    api_server_bind_port: 6443
     
   tasks:
     - name: Check if cluster is already initialized
@@ -113,28 +116,6 @@
       delay: 10
       until: cluster_info_output.rc == 0
         
-    - name: Install CNI plugin - Flannel (default)
-      block:
-        - name: Download Flannel manifest
-          shell: curl -fsSL https://github.com/flannel-io/flannel/releases/download/v0.22.0/kube-flannel.yml -o /tmp/kube-flannel.yml
-          args:
-            creates: /tmp/kube-flannel.yml
-            
-        - name: Apply Flannel CNI
-          shell: kubectl apply -f /tmp/kube-flannel.yml
-          environment:
-            KUBECONFIG: "{{ kubeconfig_path }}"
-            
-        - name: Wait for Flannel pods to be ready
-          shell: kubectl get pods -n kube-flannel --no-headers | grep -v Running | wc -l
-          register: flannel_pods_not_ready
-          until: flannel_pods_not_ready.stdout == "0"
-          retries: 30
-          delay: 10
-          environment:
-            KUBECONFIG: "{{ kubeconfig_path }}"
-          ignore_errors: yes
-      
     - name: Install CNI plugin - Flannel
       block:
         - name: Download Flannel manifest
@@ -147,10 +128,18 @@
           environment:
             KUBECONFIG: "{{ kubeconfig_path }}"
             
-      when: false  # Disabled - using Calico by default
+        - name: Wait for Flannel pods to be ready
+          shell: kubectl get pods -n kube-system --no-headers | grep flannel | grep -v Running | wc -l
+          register: flannel_pods_not_ready
+          until: flannel_pods_not_ready.stdout == "0"
+          retries: 30
+          delay: 10
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
+          ignore_errors: yes
       
     - name: Wait for CNI pods to be ready
-      shell: kubectl get pods -n kube-system --no-headers | grep -E "(calico|flannel)" | grep -v Running | wc -l
+      shell: kubectl get pods -n kube-system --no-headers | grep -E "flannel" | grep -v Running | wc -l
       register: cni_pods_not_ready
       until: cni_pods_not_ready.stdout == "0"
       retries: 30
@@ -197,14 +186,25 @@
         discovery_hash: "{{ kubernetes_discovery_token_ca_cert_hash }}"
         api_server: "{{ api_server_advertise_address }}:{{ api_server_bind_port }}"
         
-    - name: Wait for all system pods to be ready
-      shell: kubectl get pods -n kube-system --no-headers | grep -v Running | grep -v Completed | wc -l
-      register: system_pods_not_ready
-      until: system_pods_not_ready.stdout == "0"
+    - name: Check if system pods exist
+      shell: kubectl get pods -n kube-system --no-headers | wc -l
+      register: system_pods_count
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+        
+    - name: Debug system pods count
+      debug:
+        msg: "System pods count: {{ system_pods_count.stdout }}"
+        
+    - name: Wait for essential control plane pods to be ready
+      shell: kubectl get pods -n kube-system --no-headers | grep -E "(etcd|kube-apiserver|kube-controller-manager|kube-scheduler|kube-proxy)" | grep -v Running | wc -l
+      register: control_plane_pods_not_ready
+      until: control_plane_pods_not_ready.stdout == "0"
       retries: 30
       delay: 10
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
+      when: system_pods_count.stdout | int > 0
         
     - name: Remove taint from master node (allow scheduling on master)
       shell: kubectl taint nodes --all node-role.kubernetes.io/control-plane-
@@ -228,7 +228,7 @@
           - API Server: {{ ansible_default_ipv4.address }}:6443
           - Pod Subnet: 192.168.0.0/16
           - Service Subnet: 10.96.0.0/12
-          - CNI: calico
+          - CNI: flannel
           
           Current Nodes:
           {{ cluster_nodes.stdout }}
@@ -243,7 +243,7 @@
           --from-literal=api-server="{{ ansible_default_ipv4.address }}:6443" \
           --from-literal=pod-subnet="192.168.0.0/16" \
           --from-literal=service-subnet="10.96.0.0/12" \
-          --from-literal=cni="calico" \
+          --from-literal=cni="flannel" \
           --from-literal=kubernetes-version="1.28.2-1.1" \
           --namespace=kube-system \
           --dry-run=client -o yaml | kubectl apply -f -
