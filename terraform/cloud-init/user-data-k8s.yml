@@ -69,6 +69,8 @@ runcmd:
   - systemctl start systemd-resolved
   - systemctl restart ssh
   - systemctl enable ssh
+  - apt install -y qemu-guest-agent
+  - systemctl start qemu-guest-agent
 
 # Final reboot to ensure all changes take effect
 power_state:

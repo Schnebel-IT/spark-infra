@@ -1,15 +1,16 @@
+# Create cloud-init user-data file with SSH key
+resource "local_file" "cloud_init_user_data" {
+  content = templatefile("${path.module}/cloud-init-template.yml", {
+    ssh_public_key = var.ssh_public_key
+  })
+  filename = "${path.module}/cloud-init/user-data-k8s.yml"
+}
+
 # Kubernetes Manager VM
 resource "proxmox_vm_qemu" "k8s_manager" {
   name        = "spark-k8s-manager"
   vmid        = var.manager_vm_id
   target_node = var.proxmox_node
-
-  connection {
-    type = "ssh"
-    user = "luca"
-    password = "luca"
-    host = self.ssh_host
-  }
 
   # VM Configuration
   memory = var.vm_memory
@@ -63,6 +64,9 @@ resource "proxmox_vm_qemu" "k8s_manager" {
   cipassword = "ubuntu"
   sshkeys    = var.ssh_public_key
 
+  # Additional cloud-init configuration
+  cicustom = "user=local:snippets/user-data-k8s.yml"
+
   # VM Options
   agent   = 1
   onboot  = true
@@ -86,13 +90,6 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   name        = "spark-k8s-node-${count.index + 1}"
   vmid        = var.node_vm_ids[count.index]
   target_node = var.proxmox_node
-
-  connection {
-    type = "ssh"
-    user = "luca"
-    password = "luca"
-    host = self.ssh_host
-  }
 
   # VM Configuration
   memory = var.vm_memory
@@ -145,6 +142,9 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   ciuser     = "ubuntu"
   cipassword = "ubuntu"
   sshkeys    = var.ssh_public_key
+
+  # Additional cloud-init configuration
+  cicustom = "user=local:snippets/user-data-k8s.yml"
 
   # VM Options
   agent   = 1
