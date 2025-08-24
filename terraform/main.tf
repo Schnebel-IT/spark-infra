@@ -55,9 +55,10 @@ resource "proxmox_vm_qemu" "k8s_manager" {
   # Cloud-init Configuration
   clone      = var.vm_template
   full_clone = true
+  ciupgrade  = true
 
   # IP Configuration
-  ipconfig0 = "ip=${var.manager_ip}/16,gw=${var.network_gateway}"
+  ipconfig0 = "ip=${var.manager_ip}/16,gw=${var.network_gateway},ip6=dhcp"
   nameserver = "1.1.1.1 8.8.8.8"
   skip_ipv6 = true
 
@@ -136,9 +137,10 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   # Cloud-init Configuration
   clone      = var.vm_template
   full_clone = true
+  ciupgrade  = true
 
   # IP Configuration
-  ipconfig0 = "ip=${var.node_ips[count.index]}/16,gw=${var.network_gateway}"
+  ipconfig0 = "ip=${var.node_ips[count.index]}/16,gw=${var.network_gateway},ip6=dhcp"
   nameserver = "1.1.1.1 8.8.8.8"
   skip_ipv6 = true
 
