@@ -58,6 +58,8 @@ resource "proxmox_vm_qemu" "k8s_manager" {
 
   # IP Configuration
   ipconfig0 = "ip=${var.manager_ip}/16,gw=${var.network_gateway}"
+  nameserver = "1.1.1.1 8.8.8.8"
+  skip_ipv6 = true
 
   # Cloud-init settings
   ciuser     = "ubuntu"
@@ -137,6 +139,8 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
 
   # IP Configuration
   ipconfig0 = "ip=${var.node_ips[count.index]}/16,gw=${var.network_gateway}"
+  nameserver = "1.1.1.1 8.8.8.8"
+  skip_ipv6 = true
 
   # Cloud-init settings
   ciuser     = "ubuntu"
