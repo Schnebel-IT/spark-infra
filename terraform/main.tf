@@ -5,22 +5,36 @@ resource "proxmox_vm_qemu" "k8s_manager" {
   target_node = var.proxmox_node
 
   # VM Configuration
-  cores   = var.vm_cpu
   memory  = var.vm_memory
-  sockets = 1
+  cpu {
+    sockets = 1
+    cores = var.vm_cpu
+  }
 
   # Boot and OS Configuration
   boot    = "order=scsi0"
   scsihw  = "virtio-scsi-pci"
   os_type = "cloud-init"
 
-  # Disk Configuration
-  disk {
-    slot    = "scsi0"
-    storage = "local"
-    size    = var.vm_disk_size
-    format  = "raw"
-    cache   = "writethrough"
+  # Disks Configuration
+  disks {
+    ide {
+      ide2 {
+        cloudinit {
+          storage = "local"
+        }
+      }
+    }
+    scsi {
+      scsi0 {
+        disk {
+          size = var.vm_disk_size
+          cache = "writeback"
+          storage = "local"
+          format = "raw"
+        }
+      }
+    }
   }
 
   # Network Configuration
@@ -68,22 +82,36 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   target_node = var.proxmox_node
 
   # VM Configuration
-  cores   = var.vm_cpu
   memory  = var.vm_memory
-  sockets = 1
+  cpu {
+    sockets = 1
+    cores = var.vm_cpu
+  }
 
   # Boot and OS Configuration
   boot    = "order=scsi0"
   scsihw  = "virtio-scsi-pci"
   os_type = "cloud-init"
 
-  # Disk Configuration
-  disk {
-    slot    = "scsi0"
-    storage = "local"
-    size    = var.vm_disk_size
-    format  = "raw"
-    cache   = "writethrough"
+  # Disks Configuration
+  disks {
+    ide {
+      ide2 {
+        cloudinit {
+          storage = "local"
+        }
+      }
+    }
+    scsi {
+      scsi0 {
+        disk {
+          size = var.vm_disk_size
+          cache = "writeback"
+          storage = "local"
+          format = "raw"
+        }
+      }
+    }
   }
 
   # Network Configuration
