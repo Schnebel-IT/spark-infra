@@ -17,7 +17,6 @@ resource "proxmox_vm_qemu" "k8s_manager" {
   # Disk Configuration
   disk {
     slot    = "scsi0"
-    type    = "scsi"
     storage = "local-lvm"
     size    = var.vm_disk_size
     format  = "raw"
@@ -81,7 +80,6 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   # Disk Configuration
   disk {
     slot    = "scsi0"
-    type    = "scsi"
     storage = "local-lvm"
     size    = var.vm_disk_size
     format  = "raw"
