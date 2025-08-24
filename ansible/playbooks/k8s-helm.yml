@@ -40,14 +40,19 @@
       shell: |
         export HELM_INSTALL_DIR={{ helm_install_dir }}
         export DESIRED_VERSION={{ helm_version }}
+        export HELM_INSTALL_DIR={{ helm_install_dir }}
+        export DESIRED_VERSION={{ helm_version }}
         /tmp/get_helm.sh
       environment:
+        HELM_INSTALL_DIR: "{{ helm_install_dir }}"
+        DESIRED_VERSION: "{{ helm_version }}"
         HELM_INSTALL_DIR: "{{ helm_install_dir }}"
         DESIRED_VERSION: "{{ helm_version }}"
       when: not helm_binary.stat.exists
       register: helm_install_result
       
     - name: Verify Helm installation
+      shell: "{{ helm_install_dir }}/helm version --short"
       shell: "{{ helm_install_dir }}/helm version --short"
       register: helm_version_output
       failed_when: helm_version_output.rc != 0
@@ -58,6 +63,7 @@
         
     - name: Create Helm configuration directory for root
       file:
+        path: "{{ helm_config_dir }}"
         path: "{{ helm_config_dir }}"
         state: directory
         owner: root
@@ -73,6 +79,7 @@
         mode: '0755'
         
     - name: Initialize Helm (create default config)
+      shell: "{{ helm_install_dir }}/helm repo list"
       shell: "{{ helm_install_dir }}/helm repo list"
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"

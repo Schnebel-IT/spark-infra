@@ -69,10 +69,7 @@
         state: present
         sysctl_file: /etc/sysctl.d/k8s.conf
         reload: yes
-      loop:
-        - { key: "net.bridge.bridge-nf-call-iptables", value: "1" }
-        - { key: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
-        - { key: "net.ipv4.ip_forward", value: "1" }  
+      loop: "{{ sysctl_params | dict2items }}"  
     
     # Container Runtime (containerd) Installation
     - name: Create keyrings directory
@@ -82,15 +79,14 @@
         mode: '0755'
         
     - name: Add Docker GPG key
-      shell: |
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-        chmod 644 /etc/apt/keyrings/docker.gpg
-      args:
-        creates: /etc/apt/keyrings/docker.gpg
+      get_url:
+        url: "{{ docker_apt_key_url }}"
+        dest: /etc/apt/keyrings/docker.gpg
+        mode: '0644'
         
     - name: Add Docker repository
       apt_repository:
-        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        repo: "{{ docker_apt_repository }}"
         state: present
         filename: docker
         
@@ -107,85 +103,44 @@
         state: directory
         mode: '0755'
         
-    - name: Remove existing containerd configuration
-      file:
-        path: /etc/containerd/config.toml
-        state: absent
-        
-    - name: Generate fresh containerd configuration
+    - name: Generate default containerd configuration
       shell: containerd config default > /etc/containerd/config.toml
-      
-    - name: Configure containerd to use systemd cgroup driver
-      replace:
-        path: /etc/containerd/config.toml
-        regexp: 'SystemdCgroup = false'
-        replace: 'SystemdCgroup = true'
+      args:
+        creates: /etc/containerd/config.toml
         
-    - name: Restart and enable containerd service
+    - name: Configure containerd to use systemd cgroup driver
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*SystemdCgroup\s*='
+        line: '            SystemdCgroup = true'
+        insertafter: '^\s*\[plugins\."io\.containerd\.grpc\.v1\.cri"\.containerd\.runtimes\.runc\.options\]'
+        
+    - name: Enable and start containerd service
       systemd:
         name: containerd
         enabled: yes
-        state: restarted
-        daemon_reload: yes
-        
-    - name: Wait for containerd to be ready
-      wait_for:
-        path: /var/run/containerd/containerd.sock
-        timeout: 30
-        
-    - name: Configure crictl to use containerd
-      copy:
-        content: |
-          runtime-endpoint: unix:///var/run/containerd/containerd.sock
-          image-endpoint: unix:///var/run/containerd/containerd.sock
-          timeout: 2
-          debug: false
-          pull-image-on-create: false
-        dest: /etc/crictl.yaml
-        mode: '0644'
-        
-    - name: Verify containerd is working
-      shell: ctr version
-      register: containerd_version
-      retries: 3
-      delay: 5
-      until: containerd_version.rc == 0
-      
-    - name: Verify crictl is working
-      shell: crictl version
-      register: crictl_version
-      retries: 3
-      delay: 5
-      until: crictl_version.rc == 0
-      
-    - name: Show containerd status for debugging
-      shell: systemctl status containerd --no-pager -l
-      register: containerd_status_debug
-      
-    - name: Display containerd status
-      debug:
-        var: containerd_status_debug.stdout_lines     
+        state: started
+        daemon_reload: yes     
    
     # Kubernetes Package Installation
     - name: Add Kubernetes GPG key
-      shell: |
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-        chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-      args:
-        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      get_url:
+        url: "{{ kubernetes_apt_key_url }}"
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
         
     - name: Add Kubernetes repository
       apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        repo: "{{ kubernetes_apt_repository }}"
         state: present
         filename: kubernetes
         
     - name: Install Kubernetes packages
       apt:
         name:
-          - kubelet=1.28.2-1.1
-          - kubeadm=1.28.2-1.1
-          - kubectl=1.28.2-1.1
+          - kubelet={{ kubernetes_version }}
+          - kubeadm={{ kubernetes_version }}
+          - kubectl={{ kubernetes_version }}
         state: present
         update_cache: yes
         
