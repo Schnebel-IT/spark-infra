@@ -1,9 +1,21 @@
-# Create cloud-init user-data file with SSH key
-resource "local_file" "cloud_init_user_data" {
+# Create cloud-init user-data file for manager
+resource "local_file" "cloud_init_user_data_manager" {
   content = templatefile("${path.module}/cloud-init-template.yml", {
     ssh_public_key = var.ssh_public_key
+    hostname = "spark-k8s-manager"
   })
-  filename = "${path.module}/cloud-init/user-data-k8s.yml"
+  filename = "${path.module}/cloud-init/user-data-k8s-manager.yml"
+}
+
+# Create cloud-init user-data files for worker nodes
+resource "local_file" "cloud_init_user_data_nodes" {
+  count = length(var.node_vm_ids)
+  
+  content = templatefile("${path.module}/cloud-init-template.yml", {
+    ssh_public_key = var.ssh_public_key
+    hostname = "spark-k8s-node-${count.index + 1}"
+  })
+  filename = "${path.module}/cloud-init/user-data-k8s-node-${count.index + 1}.yml"
 }
 
 # Kubernetes Manager VM
@@ -58,8 +70,8 @@ resource "proxmox_vm_qemu" "k8s_manager" {
   ciupgrade  = true
 
   # IP Configuration
-  ipconfig1 = "ip=${var.manager_ip}/16,gw=${var.network_gateway},ip6=dhcp"
-  nameserver = "1.1.1.1 8.8.8.8"
+  ipconfig0 = "ip=${var.manager_ip}/16,gw=${var.network_gateway}"
+  nameserver = var.dns_servers
   skip_ipv6 = true
 
   # Cloud-init settings
@@ -68,7 +80,7 @@ resource "proxmox_vm_qemu" "k8s_manager" {
   sshkeys    = var.ssh_public_key
 
   # Additional cloud-init configuration
-  cicustom = "user=local:snippets/user-data-k8s.yml"
+  cicustom = "user=local:snippets/user-data-k8s-manager.yml"
 
   # VM Options
   agent   = 1
@@ -83,7 +95,7 @@ resource "proxmox_vm_qemu" "k8s_manager" {
     ]
   }
 
-  depends_on = [local_file.cloud_init_user_data]
+  depends_on = [local_file.cloud_init_user_data_manager]
 }
 
 # Kubernetes Worker Nodes
@@ -140,8 +152,8 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   ciupgrade  = true
 
   # IP Configuration
-  ipconfig1 = "ip=${var.node_ips[count.index]}/16,gw=${var.network_gateway},ip6=dhcp"
-  nameserver = "1.1.1.1 8.8.8.8"
+  ipconfig0 = "ip=${var.node_ips[count.index]}/16,gw=${var.network_gateway}"
+  nameserver = var.dns_servers
   skip_ipv6 = true
 
   # Cloud-init settings
@@ -150,7 +162,7 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
   sshkeys    = var.ssh_public_key
 
   # Additional cloud-init configuration
-  cicustom = "user=local:snippets/user-data-k8s.yml"
+  cicustom = "user=local:snippets/user-data-k8s-node-${count.index + 1}.yml"
 
   # VM Options
   agent   = 1
@@ -165,5 +177,5 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
     ]
   }
 
-  depends_on = [proxmox_vm_qemu.k8s_manager, local_file.cloud_init_user_data]
+  depends_on = [proxmox_vm_qemu.k8s_manager, local_file.cloud_init_user_data_nodes]
 }
